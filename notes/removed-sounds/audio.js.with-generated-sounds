@@ -1,0 +1,584 @@
+// Sound. Things in the room are heard from where they are; the listener follows the camera.
+//
+// Anything a real object or animal makes — footsteps, the cat, birds, the door — is only ever a
+// recording, dropped into assets/sounds/ and picked up by name (see BANK). With no recording
+// there is simply no sound: nothing organic is faked. Electronic noises (beeps, hums, the
+// picture tube, the PC's chimes) are generated here, and a recording replaces those too if present.
+import * as THREE from 'three';
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const midi = (n) => 440 * 2 ** ((n - 69) / 12);
+
+const WINDOW = [1.975, 1.6, -5], PC = [3.5, 0.9, 1.66], TV = [0.55, 0.9, 1.85];
+
+// Recordings, by file name: assets/sounds/<name>.ogg, or <name>-1.ogg, <name>-2.ogg … for takes
+// that are picked from at random (.mp3, .wav, .m4a and .flac work too).
+// gain: playback level (every recording is first brought to the same peak, so this is relative);
+// vary: random pitch change either way, so repeats don't sound stamped;
+// cycle: play the takes in file order (-1, -2, …) instead of at random — left foot, right foot;
+// cut: everything below this many Hz is stripped when the file loads (default 70) — field
+//      recordings carry rumble far louder than the sound itself, and levelling must ignore it;
+// soften: a low-pass at this many Hz, to take the edge off;
+// fade: [in, out] seconds, so a clip's own background doesn't switch on and off audibly.
+const SOUND_DIR = 'assets/sounds/';
+const BANK = {
+  'step-carpet': { gain: 0.056, vary: 0.03, cycle: true, soften: 2200 }, 'step-bed': { gain: 0.45, vary: 0.03, cycle: true }, 'step-wood': { gain: 0.5, vary: 0.03, cycle: true },
+  'land-carpet': { gain: 0.7, vary: 0.04 }, 'land-bed': { gain: 0.7, vary: 0.04 }, 'land-wood': { gain: 0.7, vary: 0.04 },
+  'step-tile': { gain: 0.45, vary: 0.03, cycle: true }, 'step-grass': { gain: 0.45, vary: 0.04, cycle: true },
+  'land-tile': { gain: 0.7, vary: 0.04 }, 'land-grass': { gain: 0.7, vary: 0.04 },
+  'cat-meow': { gain: 0.55, vary: 0.04 }, 'cat-purr': { gain: 0.5, vary: 0 }, 'cat-lick': { gain: 0.25, vary: 0.05 }, 'cat-land': { gain: 0.4, vary: 0.05 },
+  bird: { gain: 0.6, vary: 0.02, cut: 400, fade: [0.3, 0.6] }, pigeon: { gain: 0.15, vary: 0.01, cut: 120, fade: [0.3, 0.6] },
+  'door-open': { gain: 0.7, vary: 0.02 }, 'door-close': { gain: 0.7, vary: 0.02 }, blinds: { gain: 0.6, vary: 0.03 },
+  'chair-sit': { gain: 0.5, vary: 0.04 }, 'chair-stand': { gain: 0.5, vary: 0.04 },
+  'bag-open': { gain: 0.5, vary: 0.03 }, 'bag-spill': { gain: 0.5, vary: 0.03 }, take: { gain: 0.4, vary: 0.05 },
+  // the bathroom: a tap turned, the bath running and running over (both played round and round), the toilet lid
+  'tap-turn': { gain: 0.5, vary: 0.04 }, 'bath-run': { gain: 0.5, vary: 0 }, 'bath-spill': { gain: 0.45, vary: 0 }, 'toilet-lid': { gain: 0.6, vary: 0.03 },
+  'step-water': { gain: 0.45, vary: 0.04, cycle: true }, 'land-water': { gain: 0.7, vary: 0.04 },
+  // these stand in for generated sounds when present
+  switch: { gain: 0.6, vary: 0.03 }, 'tv-on': { gain: 0.6, vary: 0 }, 'tv-off': { gain: 0.6, vary: 0 },
+  'pc-on': { gain: 0.6, vary: 0 }, 'pc-off': { gain: 0.6, vary: 0 }, 'pc-seek': { gain: 0.5, vary: 0.04 }, 'pc-floppy': { gain: 0.5, vary: 0 },
+  key: { gain: 0.45, vary: 0.06 }, 'mouse-click': { gain: 0.4, vary: 0.04 },
+};
+
+/** Strips everything below `hz` from a recording, in place (two passes of a second-order high-pass). */
+function removeRumble(buffer, hz) {
+  const w = (2 * Math.PI * hz) / buffer.sampleRate, cos = Math.cos(w), alpha = Math.sin(w) / Math.SQRT2;
+  const b0 = (1 + cos) / 2 / (1 + alpha), b1 = -(1 + cos) / (1 + alpha), a1 = (-2 * cos) / (1 + alpha), a2 = (1 - alpha) / (1 + alpha);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c);
+    for (let pass = 0; pass < 2; pass++) {
+      let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+      for (let i = 0; i < d.length; i++) {
+        const x = d[i], y = b0 * x + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        d[i] = y;
+      }
+    }
+  }
+}
+
+function noiseBuffer(ctx, seconds, brown) {
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < d.length; i++) {
+    const w = Math.random() * 2 - 1;
+    // brown noise: a leaky running sum of white, for rumble and room tone
+    d[i] = brown ? (last = (last + 0.02 * w) / 1.02) * 3.5 : w;
+  }
+  return buf;
+}
+
+// ---- the tune on the TV's title screen: an original eight-bar loop, counted in eighth notes.
+// Chord per bar, then the lead line as [eighth, midi note, length in eighths].
+const BARS = [[50, 57, 62, 65], [46, 53, 58, 62], [41, 48, 53, 57], [48, 55, 60, 64], [50, 57, 62, 65], [43, 50, 55, 58], [46, 53, 58, 62], [45, 52, 57, 61]];
+const LEAD = [
+  [0, 69, 2], [2, 74, 2], [4, 77, 3], [7, 76, 1], [8, 74, 4], [12, 70, 2], [14, 74, 2],
+  [16, 72, 2], [18, 77, 2], [20, 81, 3], [23, 79, 1], [24, 76, 4], [28, 72, 2], [30, 67, 2],
+  [32, 69, 2], [34, 74, 2], [36, 77, 2], [38, 81, 2], [40, 82, 3], [43, 81, 1], [44, 79, 4],
+  [48, 77, 2], [50, 74, 2], [52, 70, 2], [54, 74, 2], [56, 76, 4], [60, 73, 4],
+];
+const EIGHTH = 60 / 96 / 2;
+
+export class Sound {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+    this.paused = false;
+    this.tvOn = false;
+    this.pcOn = false;
+    this.song = { step: 0, next: 0 };
+    this.life = { bird: rnd(10, 30), pigeon: rnd(40, 100) };
+    this.samples = {}; // name → { takes: [AudioBuffer], last }
+  }
+
+  /** Has to be called from a user gesture (the Enter button), or the browser keeps it silent. */
+  start() {
+    if (this.ctx) return this.ctx.resume();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = (this.ctx = new AC());
+    this.master = ctx.createGain();
+    this.master.gain.value = 0.9;
+    this.master.connect(ctx.createDynamicsCompressor()).connect(ctx.destination);
+    this.white = noiseBuffer(ctx, 2, false);
+    this.brown = noiseBuffer(ctx, 3, true);
+    this.buildAmbience();
+    this.buildTv();
+    this.loadSamples();
+  }
+
+  // ---------------- recordings
+
+  /** Finds whatever is in assets/sounds/ (folder listing while developing, list.json when published). */
+  async loadSamples() {
+    let files = [];
+    try {
+      const res = await fetch(SOUND_DIR);
+      if (res.ok) files = [...(await res.text()).matchAll(/href="([^"?#]+\.(?:ogg|mp3|wav|m4a|flac))"/gi)].map((m) => decodeURIComponent(m[1]));
+      else files = await (await fetch(`${SOUND_DIR}list.json`)).json();
+    } catch { /* no recordings available: the room is just quieter */ }
+    const found = [];
+    await Promise.all(files.map(async (file) => {
+      const name = file.replace(/^.*\//, '').replace(/(-\d+)?\.\w+$/, '');
+      if (!BANK[name]) return;
+      try {
+        const buffer = await this.ctx.decodeAudioData(await (await fetch(SOUND_DIR + file)).arrayBuffer());
+        // recordings arrive with rumble, at any level, and with dead air in front: deal with all three
+        removeRumble(buffer, BANK[name].cut ?? 70);
+        let peak = 0, onset = buffer.length;
+        for (let c = 0; c < buffer.numberOfChannels; c++) for (const v of buffer.getChannelData(c)) peak = Math.max(peak, Math.abs(v));
+        for (let c = 0; c < buffer.numberOfChannels; c++) onset = Math.min(onset, buffer.getChannelData(c).findIndex((v) => Math.abs(v) > peak * 0.1));
+        found.push({ name, file, buffer, level: Math.min(0.5 / Math.max(peak, 1e-4), 400), skip: Math.max(onset / buffer.sampleRate - 0.005, 0) });
+      } catch { console.warn(`sound: could not read ${file}`); }
+    }));
+    found.sort((p, q) => p.file.localeCompare(q.file, undefined, { numeric: true }));
+    for (const take of found) (this.samples[take.name] ??= { takes: [], last: -1, next: 0 }).takes.push(take);
+  }
+
+  /**
+   * A recording played round and round from `pos` for as long as something keeps going (a running tap).
+   * `set(level)`: 0…1, faded to; at 0 it falls silent. Nothing if there is no recording of it.
+   */
+  steady(name, pos) {
+    let vol = null;
+    return {
+      set: (level) => {
+        const s = this.samples[name];
+        if (!this.ctx || !s) return;
+        const take = s.takes[0], t = this.ctx.currentTime;
+        if (!vol) {
+          if (level <= 0) return;
+          const src = this.ctx.createBufferSource();
+          src.buffer = take.buffer;
+          src.loop = true;
+          src.loopStart = take.skip;
+          src.loopEnd = take.buffer.duration;
+          vol = this.ctx.createGain();
+          vol.gain.value = 0;
+          this.chain(src, vol, this.at(pos, 1.2));
+          src.start(t, take.skip);
+        }
+        const to = BANK[name].gain * take.level * level;
+        if (Math.abs(vol.gain.value - to) > 1e-3) vol.gain.setTargetAtTime(to, t, 0.25);
+      },
+    };
+  }
+
+  /**
+   * Plays a recording if there is one and returns how long it will last (false if there is
+   * none). `where` is a point in the room ([x, y, z] or a Vector3) or an audio node to play into.
+   */
+  sample(name, where, level = 1) {
+    const s = this.samples[name];
+    if (!this.ctx || !s) return false;
+    const dest = where instanceof AudioNode ? where : this.at(where);
+    let i;
+    if (BANK[name].cycle) {
+      i = s.next;
+      s.next = (s.next + 1) % s.takes.length;
+    } else {
+      i = Math.floor(Math.random() * s.takes.length);
+      if (s.takes.length > 1 && i === s.last) i = (i + 1) % s.takes.length; // never the same take twice running
+    }
+    s.last = i;
+    const take = s.takes[i], bank = BANK[name], t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = take.buffer;
+    src.playbackRate.value = 1 + rnd(-bank.vary, bank.vary);
+    const seconds = (take.buffer.duration - take.skip) / src.playbackRate.value;
+    const vol = this.ctx.createGain(), loud = bank.gain * take.level * level;
+    if (bank.fade) {
+      vol.gain.setValueAtTime(0, t);
+      vol.gain.linearRampToValueAtTime(loud, t + bank.fade[0]);
+      vol.gain.setValueAtTime(loud, t + seconds - bank.fade[1]);
+      vol.gain.linearRampToValueAtTime(0, t + seconds);
+    } else vol.gain.value = loud;
+    this.chain(...[src, bank.soften && this.filter('lowpass', bank.soften, 0.6), vol, dest].filter(Boolean));
+    src.start(t, take.skip);
+    return seconds;
+  }
+
+  setPaused(on) {
+    this.paused = on;
+    this.applyVolume();
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    this.applyVolume();
+    return this.muted;
+  }
+
+  applyVolume() {
+    if (!this.ctx) return;
+    this.master.gain.setTargetAtTime(this.muted || this.paused ? 0 : 0.9, this.ctx.currentTime, 0.05);
+  }
+
+  // ---------------- building blocks
+
+  /** Where a sound plays from: a point in the room, or straight to the ears if `pos` is omitted. */
+  at(pos, reach = 0.8) {
+    if (!pos) return this.master;
+    const p = this.ctx.createPanner();
+    p.panningModel = 'equalpower';
+    p.distanceModel = 'inverse';
+    p.refDistance = reach; // how far away it still sounds full: small for a switch, large for the street
+    p.rolloffFactor = 1.3;
+    const [x, y, z] = pos.isVector3 ? pos.toArray() : pos;
+    if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
+    p.connect(this.master);
+    return p;
+  }
+
+  /** Gain with a quick rise to `peak` and a decay over `dur` seconds. */
+  shaped(dest, t, dur, peak, attack = 0.004) {
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + dur);
+    g.connect(dest);
+    return g;
+  }
+
+  noise(dest, { t = this.ctx.currentTime, dur = 0.1, peak = 0.1, attack, brown = false, type = 'lowpass', freq = 1000, to = null, q = 0.7 }) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = brown ? this.brown : this.white;
+    src.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = type;
+    f.Q.value = q;
+    f.frequency.setValueAtTime(freq, t);
+    if (to) f.frequency.exponentialRampToValueAtTime(to, t + dur);
+    // a filter throws most of white noise away; make up for it so `peak` means roughly what it says
+    const band = type === 'lowpass' ? freq : type === 'bandpass' ? freq / q : 20000 - freq;
+    const makeup = brown ? 1 : THREE.MathUtils.clamp(Math.sqrt(12000 / band), 1, 6);
+    src.connect(f).connect(this.shaped(dest, t, dur, peak * makeup, attack));
+    src.start(t, rnd(0, 1.5));
+    src.stop(t + dur + (attack ?? 0.004) + 0.05);
+  }
+
+  tone(dest, { t = this.ctx.currentTime, dur = 0.1, peak = 0.1, attack, type = 'sine', freq = 440, to = null }) {
+    const osc = this.ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+    osc.connect(this.shaped(dest, t, dur, peak, attack));
+    osc.start(t);
+    osc.stop(t + dur + (attack ?? 0.004) + 0.05);
+    return osc;
+  }
+
+  /** Impulse response of open air between buildings: a dense, dulling tail `tail` seconds long. */
+  distance(seconds, tail) {
+    const rate = this.ctx.sampleRate, n = Math.floor(rate * seconds);
+    const ir = this.ctx.createBuffer(2, n, rate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      let smooth = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / rate;
+        // later echoes have lost more of their treble
+        smooth += (Math.random() * 2 - 1 - smooth) * Math.max(0.08, 0.6 - t * 0.9);
+        d[i] = t < 0.012 ? 0 : smooth * Math.exp(-t / tail);
+      }
+    }
+    return ir;
+  }
+
+  loop(buffer, dest) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.connect(dest);
+    src.start();
+  }
+
+  chain(...nodes) {
+    for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+    return nodes[0];
+  }
+
+  filter(type, freq, q = 0.7) {
+    const f = this.ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    return f;
+  }
+
+  gain(value) {
+    const g = this.ctx.createGain();
+    g.gain.value = value;
+    return g;
+  }
+
+  // ---------------- the room's standing sounds
+
+  buildAmbience() {
+    const ctx = this.ctx;
+    // room tone
+    this.loop(this.brown, this.chain(this.filter('lowpass', 180), this.gain(0.035), this.master));
+    // the street, well beyond closed glass. Three things make it sound far off rather than
+    // quiet-but-near: nearly all of it arrives as echo off the buildings instead of directly, the
+    // top end is gone, and it comes from well out past the window — a tree, a roof across the
+    // road (outsideFrom) — rather than from the sill.
+    this.outside = this.gain(1);
+    const echo = ctx.createConvolver();
+    echo.buffer = this.distance(1.6, 0.4);
+    this.outsideTone = this.filter('lowpass', 2000, 0.5);
+    this.chain(this.outside, this.gain(0.12), this.outsideTone);
+    this.chain(this.outside, echo, this.gain(0.88), this.outsideTone);
+    this.outsideAt = this.at(WINDOW, 6);
+    this.outsideGlass = this.filter('lowpass', 2400, 0.5);
+    this.chain(this.outsideTone, this.outsideGlass, this.gain(1), this.outsideAt);
+    // the PC's fan, transformer hum and the thin whine of its disk — silent until it's switched on
+    this.pcGate = this.gain(this.pcOn ? 1 : 0);
+    this.pcGate.connect(this.at(PC));
+    this.loop(this.white, this.chain(this.filter('bandpass', 330, 1.1), this.gain(0.04), this.pcGate));
+    for (const [freq, level] of [[118, 0.008], [437, 0.0025]]) {
+      const osc = ctx.createOscillator();
+      osc.frequency.value = freq;
+      osc.connect(this.chain(this.gain(level), this.pcGate));
+      osc.start();
+    }
+  }
+
+  buildTv() {
+    const ctx = this.ctx;
+    // everything the TV plays goes through a small, boxy speaker
+    this.tvGate = this.gain(this.tvOn ? 1 : 0);
+    this.tvBus = this.chain(this.filter('highpass', 260), this.filter('lowpass', 3400), this.gain(0.9), this.tvGate, this.at(TV));
+    const hum = ctx.createOscillator();
+    hum.frequency.value = 120;
+    hum.connect(this.chain(this.gain(0.012), this.tvGate));
+    hum.start();
+  }
+
+  setTv(on) {
+    this.tvOn = on;
+    if (this.ctx) this.tvGate.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.06);
+  }
+
+  /** The machine starting up or winding down: fan, disk, and the monitor coming on with it. */
+  pcPower(on) {
+    this.pcOn = on;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, d = this.at(PC);
+    this.pcGate.gain.cancelScheduledValues(t);
+    this.pcGate.gain.setTargetAtTime(on ? 1 : 0, t, on ? 0.9 : 0.5);
+    if (this.sample(on ? 'pc-on' : 'pc-off', d)) return;
+    this.click(PC, 1.2);
+    // the disk spinning up to speed, or coasting down
+    this.tone(d, { t: t + 0.1, dur: on ? 2.6 : 1.8, peak: 0.02, attack: 0.3, type: 'triangle', freq: on ? 70 : 437, to: on ? 437 : 60 });
+    this.crt(on, PC);
+  }
+
+  /** The blind takes a little more off the street: 1 with it open, 0 with it shut. `outdoors`: 1 out in the yard, where nothing is in the way. */
+  setOutside(open, outdoors = 0) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.outsideTone.frequency.setTargetAtTime(THREE.MathUtils.lerp(1400 + 400 * open, 9000, outdoors), t, 0.2);
+    this.outsideGlass.frequency.setTargetAtTime(THREE.MathUtils.lerp(2400, 12000, outdoors), t, 0.2);
+  }
+
+  /** Where the next thing heard out there is: up in a tree or on a roof, some way off to either side. */
+  outsideFrom() {
+    const p = this.outsideAt, x = WINDOW[0] + rnd(-7, 7), y = rnd(3, 7), z = -rnd(9, 16);
+    if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
+    return this.outside;
+  }
+
+  songStep(step, t) {
+    const chord = BARS[Math.floor(step / 8)];
+    // plucked accompaniment: up and down the chord
+    const order = [0, 1, 2, 3, 2, 1, 2, 1];
+    this.tone(this.tvBus, { t, dur: 0.5, peak: 0.1, type: 'triangle', freq: midi(chord[order[step % 8]] + 12) });
+    if (step % 8 === 0) this.tone(this.tvBus, { t, dur: 1.6, peak: 0.12, type: 'sine', freq: midi(chord[0]) });
+    // the lead: a kazoo — a sawtooth buzzing through a narrow band, with a wobble
+    for (const [at, note, len] of LEAD) {
+      if (at !== step) continue;
+      const dur = len * EIGHTH;
+      const band = this.filter('bandpass', 1250, 2.2);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.16, t + 0.035);
+      g.gain.setValueAtTime(0.16, t + dur - 0.05);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = midi(note);
+      const wobble = this.ctx.createOscillator();
+      wobble.frequency.value = 6.2;
+      wobble.connect(this.chain(this.gain(9), osc.detune));
+      this.chain(osc, band, g, this.tvBus);
+      for (const o of [osc, wobble]) { o.start(t); o.stop(t + dur + 0.05); }
+    }
+  }
+
+  // ---------------- every frame
+
+  update(dt, camera) {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    // ears
+    const l = ctx.listener;
+    camera.getWorldPosition(_p);
+    camera.getWorldDirection(_f);
+    _u.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    if (l.positionX) {
+      l.positionX.value = _p.x; l.positionY.value = _p.y; l.positionZ.value = _p.z;
+      l.forwardX.value = _f.x; l.forwardY.value = _f.y; l.forwardZ.value = _f.z;
+      l.upX.value = _u.x; l.upY.value = _u.y; l.upZ.value = _u.z;
+    } else {
+      l.setPosition(_p.x, _p.y, _p.z);
+      l.setOrientation(_f.x, _f.y, _f.z, _u.x, _u.y, _u.z);
+    }
+    if (this.paused) return;
+
+    // title music: keep a quarter of a second scheduled ahead
+    const now = ctx.currentTime;
+    if (this.song.next < now) this.song.next = now + 0.05; // after a stall, pick up from here
+    while (this.song.next < now + 0.25) {
+      if (this.tvOn) this.songStep(this.song.step, this.song.next);
+      this.song.step = (this.song.step + 1) % 64;
+      this.song.next += EIGHTH;
+    }
+
+    // life outside: a bird now and then, a pigeon more rarely, never a chorus
+    // (each wait starts when the clip ends, so two never pile up)
+    if ((this.life.bird -= dt) <= 0) this.life.bird = (this.sample('bird', this.outsideFrom(), rnd(0.5, 1)) || 0) + rnd(20, 75);
+    if ((this.life.pigeon -= dt) <= 0) this.life.pigeon = (this.sample('pigeon', this.outsideFrom(), rnd(0.6, 1)) || 0) + rnd(70, 200);
+  }
+
+  // ---------------- things that happen
+
+  click(pos, loud = 1) {
+    if (!this.ctx || this.sample('switch', pos, loud)) return;
+    const d = this.at(pos);
+    this.noise(d, { dur: 0.012, peak: 0.33 * loud, type: 'highpass', freq: 2600 });
+    this.tone(d, { dur: 0.02, peak: 0.1 * loud, type: 'square', freq: 1700, to: 900 });
+  }
+
+  /** A picture tube coming on or going off. */
+  crt(on, pos) {
+    if (!this.ctx || this.sample(on ? 'tv-on' : 'tv-off', pos)) return;
+    this.click(pos);
+    const d = this.at(pos), t = this.ctx.currentTime + 0.03;
+    if (on) {
+      this.tone(d, { t, dur: 0.4, peak: 0.2, attack: 0.03, freq: 55, to: 115 });
+      this.noise(d, { t, dur: 0.55, peak: 0.1, type: 'bandpass', freq: 6000, to: 1400, q: 1.5 });
+    } else {
+      this.tone(d, { t, dur: 0.28, peak: 0.2, freq: 150, to: 38 });
+      this.noise(d, { t, dur: 0.14, peak: 0.12, type: 'highpass', freq: 3000 });
+    }
+  }
+
+  blinds(pos) {
+    this.sample('blinds', pos);
+  }
+
+  door(opening, pos) {
+    this.sample(opening ? 'door-open' : 'door-close', pos);
+  }
+
+  /** The backpack: 'open' as the flap goes and it flops over, 'spill' as its contents slide out. */
+  bag(stage, pos) {
+    this.sample(`bag-${stage}`, pos);
+  }
+
+  /** Something small picked up off the floor. */
+  take(pos) {
+    this.sample('take', pos);
+  }
+
+  chair(sitting, pos) {
+    this.sample(sitting ? 'chair-sit' : 'chair-stand', pos);
+  }
+
+  /** A recording for a surface, or the nearest one there is: water underfoot sounds of the tiles under it until there is a recording of water. */
+  underfoot(kind, surface) {
+    return this.samples[`${kind}-${surface}`] || surface !== 'water' ? surface : 'tile';
+  }
+
+  /** A footfall. `first`: the first of a new walk, which always starts again from take 1. */
+  step(surface, speed, first) {
+    surface = this.underfoot('step', surface);
+    const s = this.samples[`step-${surface}`];
+    if (s && first) s.next = 0;
+    this.sample(`step-${surface}`, this.master, THREE.MathUtils.clamp(speed / 1.7, 0.7, 1.4));
+  }
+
+  land(speed, surface) {
+    surface = this.underfoot('land', surface);
+    this.sample(`land-${surface}`, this.master, THREE.MathUtils.clamp(speed / 3, 0.5, 1.3));
+  }
+
+  // ---------------- Luna
+
+  meow(pos) {
+    this.sample('cat-meow', pos);
+  }
+
+  purr(pos) {
+    this.sample('cat-purr', pos);
+  }
+
+  lick(pos) {
+    this.sample('cat-lick', pos);
+  }
+
+  /** Paws hitting the carpet after a jump down. */
+  catLand(pos) {
+    this.sample('cat-land', pos);
+  }
+
+  // ---------------- the PC
+
+  ui(name) {
+    if (!this.ctx) return;
+    const d = this.at(PC), t = this.ctx.currentTime;
+    if (name === 'click') { if (!this.sample('mouse-click', PC)) this.click(PC, 0.6); }
+    else if (name === 'key') {
+      if (this.sample('key', d)) return;
+      this.noise(d, { dur: 0.02, peak: 0.17, type: 'bandpass', freq: rnd(1800, 2600), q: 2 });
+      this.tone(d, { dur: 0.02, peak: 0.04, freq: rnd(260, 330) });
+    } else if (name === 'open') this.tone(d, { dur: 0.07, peak: 0.1, type: 'triangle', freq: 880 });
+    else if (name === 'boom') {
+      this.noise(d, { dur: 0.5, peak: 0.22, freq: 900, to: 90 });
+      this.tone(d, { dur: 0.4, peak: 0.15, freq: 85, to: 30 });
+    } else if (name === 'win') [79, 83, 86, 91].forEach((n, i) => this.tone(d, { t: t + i * 0.09, dur: 0.16, peak: 0.17, type: 'triangle', freq: midi(n) }));
+    else if (name === 'tick') this.noise(d, { dur: 0.008, peak: 0.1, type: 'highpass', freq: 3000 });
+    else if (name === 'beep') this.tone(d, { dur: 0.16, peak: 0.1, attack: 0.002, type: 'square', freq: 990 });
+    else if (name === 'seek') {
+      if (this.sample('pc-seek', d)) return;
+      // disk heads chattering
+      let at = t;
+      for (let i = 0, n = Math.floor(rnd(3, 9)); i < n; i++) {
+        this.noise(d, { t: at, dur: 0.012, peak: rnd(0.08, 0.18), type: 'bandpass', freq: rnd(1300, 2300), q: 4 });
+        at += rnd(0.025, 0.08);
+      }
+    } else if (name === 'floppy') {
+      if (this.sample('pc-floppy', d)) return;
+      // the floppy drive checking for a disk: two buzzing grunts
+      for (const at of [t, t + 0.34]) {
+        const band = this.filter('lowpass', 900);
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = 92;
+        this.chain(osc, band, this.shaped(d, at, 0.22, 0.14, 0.01));
+        osc.start(at);
+        osc.stop(at + 0.3);
+      }
+    } else if (name === 'chime' || name === 'bye') {
+      // original start-up and shut-down chimes: four soft bell notes, then a held chord on the way in
+      const notes = name === 'chime' ? [73, 69, 76, 83] : [76, 73, 69, 64];
+      notes.forEach((n, i) => {
+        for (const [type, level] of [['sine', 0.09], ['triangle', 0.04]]) this.tone(d, { t: t + i * 0.28, dur: 1.4, peak: level, attack: 0.02, type, freq: midi(n) });
+      });
+      if (name === 'chime') [57, 64, 69, 73].forEach((n) => this.tone(d, { t: t + 1.1, dur: 2.6, peak: 0.035, attack: 0.5, freq: midi(n) }));
+    }
+  }
+}
+
+const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _u = new THREE.Vector3();

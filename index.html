@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2003</title>
+  <link rel="preload" href="assets/fonts/StrongvillaFunCuteCursive.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="underwater" hidden></div>
+  <div id="fade"></div>
+
+  <div id="crosshair" hidden></div>
+  <div id="prompt" hidden><kbd>E</kbd><span id="prompt-label"></span></div>
+  <div id="say" hidden></div>
+  <div id="hint" hidden></div>
+  <div id="inventory" hidden>
+    <div class="inv-title">Inventory</div>
+    <div id="inv-slots"></div>
+    <div class="inv-foot"><span id="inv-name"></span><span id="inv-keys"><kbd>E</kbd><span id="inv-act">hold</span></span><span class="inv-close"><kbd>I</kbd>close</span></div>
+  </div>
+
+  <div id="start" class="overlay">
+    <div class="win">
+      <div class="win-title"><span>2003.exe</span><span class="win-x">×</span></div>
+      <div class="win-body">
+        <p class="win-lead">It's 2003. You just got home from school.</p>
+        <ul class="keys">
+          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</li>
+          <li><kbd>Mouse</kbd> look around · <kbd>Click</kbd> or <kbd>E</kbd> interact</li>
+          <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> run · <kbd>C</kbd> crouch</li>
+          <li><kbd>I</kbd> inventory · <kbd>Esc</kbd> pause · <kbd>M</kbd> sound on/off</li>
+        </ul>
+        <button id="start-btn" type="button">Enter</button>
+        <p id="start-status" class="win-status">Loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
