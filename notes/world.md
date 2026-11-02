@@ -1,7 +1,6 @@
-# 2003 — approved state of the yard, the wood, the house outside, inside the house, recent indoor work
+# 2003 — approved state of the yard, the wood, the end of the garden, the house outside and inside
 
-Moved out of `CLAUDE.md` on 2026-10-20 (unchanged text) so it isn't loaded every session.
-Read the part you need before touching any of these things; keep it up to date the same way CLAUDE.md was.
+Read the part you need before touching any of these things, and keep it up to date as they change.
 
 ## The yard, the wood, the house outside (approved state, 2026-10-20)
 
@@ -133,7 +132,42 @@ Read the part you need before touching any of these things; keep it up to date t
   pigeon loud only in the bedroom, faint through walls elsewhere, silent in the bathroom; no light round the shut
   bathroom door (a shadow-only block in the frame).
 
-## Inside the house (moved from CLAUDE.md, 2026-10-27, unchanged text)
+## Inside the house
 
-- **`js/house.js`**: `PLAN` constants; bathroom long and narrow — 14.5 m since 2026-10-19, `z1` 20.2, the bath far off at its end, three ceiling drums down it (the two nearer the door shadowed, the far one not: nothing past its walls), one switch for all; kitchen + living room; corridor — 11 m since 2026-10-19, at its end the attic's hatch in the ceiling (`atticHatch`: old boards; the lid lying over the hole, pushed 16 cm aside, a black slit along the east edge; a heavy old ladder from where its feet were, leant across to that slit at ~30°, every rung there (one split), scratched and gouged (`oldTimberTex(…, scratched)`), rungs rubbed pale in the middle; the lamp by it, unshadowed, 2.8 m reach, is dark most of the time and fights to come on — a failing supply: the glow follows its target with a filament's lag (up 45 ms, down 90 ms) and wavers while lit, never snapping; a collider fills the corridor from the ladder's foot to the end: the pocket behind it was free floor nobody could reach, and Luna would set off for it and walk into the wall), its picture a matte, faded print; inside: wallpaper after the pattern he sent, redrawn (`ditsyFloralTex`: beige, small grey-brown flowers and posies, olive leaves), a grey-green tongue-and-groove wainscot to 1.02 m with a rail (`beadboardTex`), stopping at the door casings; the bedroom's own carpet carried on (same texture and size, across the doorway too), with dirt laid over it (`corridorDirtTex`: walls' edges, the trodden middle, stains, dust under the hatch); outside, past the bedroom, its walls wear the siding; locked front door and Mum's door
-- **`js/boat.js`**: Luna's boat (it comes up right beside her wherever she is in the bathroom, by the door only if she isn't in there or there's no room by her), sou'wester, diving gear, the boat sinking when the bathroom is full (Luna: up on her feet in the boat, the suit on, a crouch, a leap off the bow into the water — `splash` jump — and only then swimming; `cat.dive` never starts while she rides)
+- **`js/house.js`**: `PLAN` constants; kitchen + living room; locked front door and Mum's door.
+- **Bathroom**: long and narrow, 14.5 m (`z1` 20.2), the bath far off at its end; three ceiling drums down it (the two
+  nearer the door shadowed, the far one not: nothing past its walls), one switch for all.
+- **Corridor**: 11 m; inside, wallpaper after his pattern, redrawn (`ditsyFloralTex`: beige, small grey-brown flowers
+  and posies, olive leaves), a grey-green tongue-and-groove wainscot to 1.02 m with a rail (`beadboardTex`), stopping
+  at the door casings; the bedroom's carpet carried on (same texture and size, across the doorway too), dirt over it
+  (`corridorDirtTex`: walls' edges, the trodden middle, stains, dust under the hatch); outside, past the bedroom, its
+  walls wear the siding; its picture a matte, faded print.
+- **The attic hatch** at the corridor's end (`atticHatch`): old boards; the lid over the hole, pushed 16 cm aside, a
+  black slit along the east edge; a heavy old ladder leant across to that slit at ~30°, every rung there (one split),
+  scratched and gouged (`oldTimberTex(…, scratched)`), rungs rubbed pale in the middle. A collider fills the corridor
+  from the ladder's foot to the end (the pocket behind was free floor nobody could reach; Luna walked into the wall).
+  Its lamp: unshadowed, 2.8 m reach, dark most of the time and fighting to come on — a failing supply: the glow
+  follows its target with a filament's lag (up 45 ms, down 90 ms) and wavers while lit, never snapping.
+- **`js/boat.js`**: Luna's boat comes up right beside her wherever she is in the bathroom (by the door only if she
+  isn't in there or there's no room by her). When the bathroom is full: she stands up in the boat, the suit goes on,
+  a crouch, a leap off the bow (`splash` jump), and only then swims; `cat.dive` never starts while she rides.
+
+## The end of the garden (`js/pool.js`; he laid it out with a sketch, 2026-11-01/02)
+
+- **Shape**: the yard is an L now. `PLAN.yard`: `z0` −22.2, `step` −14 (where the old far fence stood), `x2` 9.3: past `step` it widens east to `x2`,
+  the fence turning out along `step`. In yard.js `Y` is still the old yard to `END` (−14: its lawn, grass, leaves, grove, all untouched, same dice)
+  and `YF` the whole of it. Where `notes/world.md` says the yard ends at −14, that is this `END`. `DZ` = `YF.z0 + 7.2 − 3` (neighbours further off, room for
+  trees behind the fence). The fence's old boards keep their dice; new lengths have their own, after them. Sky bigger (dome 36, tree line 33, centred z −8),
+  camera far 62, the neighbours' grass out to ±70 (short of the tree line the sky showed under the fence). The sun's shadow box is bigger: shadows ~25% less sharp than before.
+- **The house's power line** runs exactly where it did (the grove grew round it: the grove gets `wire`, the old points) but starts from a pole just outside the step,
+  fed from a pole further east and the alley. Anything new keeps off `lines` (`wire` + `wire.span`). `toLine` gives NaN on a repeated point: every leaf went.
+- **Pool**: long side across the yard, 8.2 × 4.2 m inside, west end a full half-round ("it was perfect like that"), east end square. Worked out in its own frame, turned a quarter
+  (`POOL.at`, `toYard`, `sdPool`/`sdLocal`). Water opaque, level −0.55. Colliders stop you on the coping (walked at from 72 directions: ≥ 11 cm off the water).
+  In it `DROWNED`: a flamingo's head and a bit of neck, tilted, mouldy, the eye on the house's side gone (`drownedFlamingo`, yard.js).
+- **Paving**: rows of setts (`settGeo`, instanced), up against the coping (cut narrower or shorter, never a row left off); some gone, 7.5% broken, each its own (`brokenStones`).
+  Puddles are see-through (`puddleTex`), not black. Fading out of the leaves `paved`/`litter`. Leaves are never mirrored in instancing: lit from the wrong side they go black.
+- **Table and chairs**: `TABLE` (−3.5, −16.86), nine rows of paving nearer the house than first; a chair each side and one on the house's side, knocked over (his sketch); iron bars only, no seat boards.
+- **Bushes** all along the fence (`hedge`, walked with its own dice): tall, thick, gaps; nothing hanging in the air: long shoots have stems. **Trees** outside the fence (`outsideTrees`, grove.js), boughs sagging in over it.
+- **Angel**: PROVISIONAL, he will generate a model and send it (his reference is his frontal photograph of a weathered stone angel, not in the project). At the pool's east end, facing it (`ANGEL`, `marbleAngel`).
+  Sculpting a likeness in code didn't satisfy him; a relief built straight from his photo was faithful from the front but broke up from the side, and he had it reverted. Replacing it: swap `marbleAngel`'s geometry; flag the model's licence (rule 2).
+- **AC fan** (house.js `fanJam`): only its speed is ever set. Every 4–34 s (`Math.random`) one of three jams; it always struggles first, catches sharply, breaks free sharply. "Take the hose" only on the coil (`loopBox`; the wide `zone` only for hanging it back: layers).
