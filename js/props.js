@@ -1147,6 +1147,7 @@ function buildTeddy(scene, ctx) {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x, y, z);
     m.rotation.y = ry;
+    m.receiveShadow = true; // (eyes, nose, ears, pads: without it the sun lit them through the shut blind — user, 2026-11-02)
     bear.add(m);
   };
   add(ellipsoid(0.088, 0.1, 0.078), 0.012, plush, 0, 0.1, 0);
@@ -1581,6 +1582,7 @@ function buildShelf(scene, M, ctx) {
     train.add(link);
     for (const p of [a, b]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0028, 8, 6), white);
+      eye.receiveShadow = true; // (else the sun lit them through the wall, blind shut: white sparks along the train — user, 2026-11-02)
       eye.position.copy(p);
       train.add(eye);
     }

@@ -309,9 +309,11 @@ export class Player {
       this.vy += (want - this.vy) * (1 - Math.exp(-dt * 2.5));
       this.feet += this.vy * dt;
       const g = this.ground();
-      if (this.feet < g) { this.feet = g; this.vy = Math.max(0, this.vy); }
       const top = Math.min(level + 0.1, this.bounds.top - 0.08, this.headroomAt(this.pos.x, this.pos.y));
       if (this.feet + this.eye > top) { this.feet = top - this.eye; this.vy = Math.min(0, this.vy); }
+      // and never down through the floor: the water going down fast (bath.js drain) took you down with your head at
+      // its surface, through the floor — crouched, it looked (user, 2026-11-02); on the bottom you stand till it is shallow
+      if (this.feet < g) { this.feet = g; this.vy = Math.max(0, this.vy); }
       this.grounded = false;
     } else if (!this.grounded || this.feet > this.ground() + 1e-4) {
       // vertical: in the air after a jump, or after walking off the edge of something

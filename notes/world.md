@@ -136,12 +136,15 @@ Read the part you need before touching any of these things, and keep it up to da
 
 - **`js/house.js`**: `PLAN` constants; kitchen + living room; locked front door and Mum's door.
 - **Bathroom**: long and narrow, 14.5 m (`z1` 20.2), the bath far off at its end; three ceiling drums down it (the two
-  nearer the door shadowed, the far one not: nothing past its walls), one switch for all.
+  nearer the door shadowed, the far one not: nothing past its walls), one switch for all. Tiles 10 cm: what runs across
+  the room (floor, ceiling, the door wall, the end wall, the bath's front) wears `mat.tileX`, counted from the west
+  wall — 16 whole tiles across, none cut at the sides (2026-11-02); along the room a 2 cm sliver is left at the door.
 - **Corridor**: 11 m; inside, wallpaper after his pattern, redrawn (`ditsyFloralTex`: beige, small grey-brown flowers
   and posies, olive leaves), a grey-green tongue-and-groove wainscot to 1.02 m with a rail (`beadboardTex`), stopping
   at the door casings; the bedroom's carpet carried on (same texture and size, across the doorway too), dirt over it
   (`corridorDirtTex`: walls' edges, the trodden middle, stains, dust under the hatch); outside, past the bedroom, its
-  walls wear the siding; its picture a matte, faded print.
+  walls wear the siding; its picture a matte, faded print. Where another picture hung (by Mum's door, `ghost` in
+  `wallpaperWearTex`) the paper is cleaner; the seams are drawn after it, so the panel line runs on through it.
 - **The attic hatch** at the corridor's end (`atticHatch`): old boards; the lid over the hole, pushed 16 cm aside, a
   black slit along the east edge; a heavy old ladder leant across to that slit at ~30°, every rung there (one split),
   scratched and gouged (`oldTimberTex(…, scratched)`), rungs rubbed pale in the middle. A collider fills the corridor
@@ -151,6 +154,17 @@ Read the part you need before touching any of these things, and keep it up to da
 - **`js/boat.js`**: Luna's boat comes up right beside her wherever she is in the bathroom (by the door only if she
   isn't in there or there's no room by her). When the bathroom is full: she stands up in the boat, the suit goes on,
   a crouch, a leap off the bow (`splash` jump), and only then swims; `cat.dive` never starts while she rides.
+- **The bath's cycle** (2026-11-02): going in, you can't shut the bathroom door till Luna is in ("It won't budge.");
+  then it shuts itself (main.js `bathShut`). The taps turn on only with her in and the door shut (`bath.mayOpen`),
+  both at once, and never off by hand ("It won't turn."). The room fills ×1.25 faster from half its height (1.25 m).
+  While the taps run the door won't open till the water is at the ceiling; opened then, all the water goes back in 8 s
+  (`bath.drain`): down to the floor (0–45% of it), off the floor and back up over the bath's front (45–72%), the bath
+  down its plugged plug hole with a whirl over the plug (68–100%); then the taps shut and the door opens. The boat goes
+  with it: sucked along the east side, up the front, into the bath, round and down the hole, shrinking, gone (it comes
+  up again another time). The towel goes back on its rail, the duck to its corner. Luna is carried down with the water
+  to the nearest floor 42 cm clear of everything (her helmet), turns to the door, and 2 s after the water has gone
+  shakes like a wet cat (1.1 s, 7.5 Hz): her suit vanishes in a cartoon poof — 15 small white puffs with a grey shade
+  and outline popping up round her and shrinking away. Cartoon on purpose (his words); vapour was rejected.
 
 ## The end of the garden (`js/pool.js`; he laid it out with a sketch, 2026-11-01/02)
 
@@ -168,6 +182,6 @@ Read the part you need before touching any of these things, and keep it up to da
   Puddles are see-through (`puddleTex`), not black. Fading out of the leaves `paved`/`litter`. Leaves are never mirrored in instancing: lit from the wrong side they go black.
 - **Table and chairs**: `TABLE` (−3.5, −16.86), nine rows of paving nearer the house than first; a chair each side and one on the house's side, knocked over (his sketch); iron bars only, no seat boards.
 - **Bushes** all along the fence (`hedge`, walked with its own dice): tall, thick, gaps; nothing hanging in the air: long shoots have stems. **Trees** outside the fence (`outsideTrees`, grove.js), boughs sagging in over it.
-- **Angel**: PROVISIONAL, he will generate a model and send it (his reference is his frontal photograph of a weathered stone angel, not in the project). At the pool's east end, facing it (`ANGEL`, `marbleAngel`).
+- **Angel**: his Meshy model (2026-11-02, `assets/models/angel.glb`, metres, foot of the plinth at its origin, front +z): a figure on a two-step plinth 0.64 × 0.57 m, 2.05 m to the wing tips, wings from 1.6 m up. At the pool's east end, facing it (`ANGEL`, `marbleAngel`), out of true, its foot 2–4 cm in the soil; box collider on the plinth. His textures as they are (no moss added).
   Sculpting a likeness in code didn't satisfy him; a relief built straight from his photo was faithful from the front but broke up from the side, and he had it reverted. Replacing it: swap `marbleAngel`'s geometry; flag the model's licence (rule 2).
 - **AC fan** (house.js `fanJam`): only its speed is ever set. Every 4–34 s (`Math.random`) one of three jams; it always struggles first, catches sharply, breaks free sharply. "Take the hose" only on the coil (`loopBox`; the wide `zone` only for hanging it back: layers).

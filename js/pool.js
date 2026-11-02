@@ -2,13 +2,14 @@
 // east, the leaf litter thinning over an old paving of stone setts, moss and grass in every joint. On the left a
 // wrought-iron table and three chairs, one knocked over, lost in weeds; to the right of it, across the yard and on past
 // where the old fence ran, a swimming pool nobody has seen to in years — its water stagnant and green with duckweed,
-// leaves rotting in it, its render grey, its tiles coming off. At its far short end a stone angel faces down it
-// (tools/bake-angel.mjs). Along all the fence, bushes gone wild, tall and thick, no two alike; past the fence trees, some
+// leaves rotting in it, its render grey, its tiles coming off. At its far short end a stone angel on its plinth faces
+// down it (assets/models/angel.glb). Along all the fence, bushes gone wild, tall and thick, no two alike; past the fence trees, some
 // of their crowns coming down over it. Damp, abandoned, quiet. Built in the yard's own frame (yard.js), after the grove.
 import * as THREE from 'three';
 import * as T from './textures.js';
 import { mulberry32, fbm } from './util.js';
 import { outsideTrees, leafCards } from './grove.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const S = THREE.MathUtils.smoothstep, clamp = THREE.MathUtils.clamp;
 const std = (o) => new THREE.MeshStandardMaterial(o);
@@ -254,7 +255,7 @@ export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   const furniture = ironSet(g, ctx, topAt);
 
   // ---- the stone angel at the far short end, facing down the water
-  const angel = marbleAngel(g, ctx, mossNoise);
+  const angel = marbleAngel(g, ctx);
 
   // ---- the trees outside the fence
   const trees = outsideTrees(g, ctx, { yard: Y, wire, under: [angelBox] });
@@ -1024,49 +1025,34 @@ function rho(leg, y) { for (let i = 1; i < leg.length; i++) if (leg[i][1] <= y) 
 // ---------------------------------------------------------------- the angel
 
 /**
- * The angel (for now: he will bring a model of his own): too fine to work out on loading, it is baked once by
- * tools/bake-angel.mjs into assets/models/angel.bin, and comes in a moment after the rest. A little out of true on the soft ground.
+ * The angel on its plinth: his model (Meshy AI, 2026-11-02; licence to clear before sale), shrunk once in Blender —
+ * 660k triangles to 198k, never across the texture's seams and nothing up to the feet (else the plinth's picture and its
+ * name warp: user, 2026-11-02), the colour from 8192 px to 4096, the bumps to 2048, the roughness to 1024: 15 MB instead
+ * of 80 — into assets/models/angel.glb: metres, the plinth's foot at its origin, its front +z, 2.05 m to the wing tips.
+ * It comes in a moment after the rest. A little out of true on the soft ground, sunk into it.
  */
-function marbleAngel(g, ctx, mossNoise) {
+function marbleAngel(g, ctx) {
   const blank = new THREE.BufferGeometry(); // (standing in till it arrives: the material is seen by outdoorsOnly with the rest)
   blank.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0.01, 0, 0.01, 0, 0], 3));
   blank.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
-  blank.setAttribute('color', new THREE.Float32BufferAttribute(new Array(9).fill(0.7), 3));
-  blank.setAttribute('aMoss', new THREE.Float32BufferAttribute([0, 0, 0], 1));
-  const figure = new THREE.Mesh(blank, mossy(std({ roughness: 0.66, vertexColors: true }), mossNoise, 'angel', { tri: T.marbleTex() }));
+  const figure = new THREE.Mesh(blank, std({ roughness: 1, metalness: 0 }));
   figure.castShadow = figure.receiveShadow = true;
   figure.userData.live = true;
-  figure.position.set(ANGEL.x, -0.03, ANGEL.z);
-  figure.scale.setScalar(0.93); // (a little under life-size; head 1.68 m, wing tips 1.95 m)
+  figure.position.set(ANGEL.x, -0.01, ANGEL.z); // (its foot 2–4 cm into the soil)
   figure.rotation.set(0.016, -Math.PI / 2 + 0.06, -0.018, 'YXZ'); // (its front towards the water, the pool's whole length before it)
   g.add(figure);
-  ctx.colliders.push({ type: 'seg', ax: ANGEL.x, az: ANGEL.z, bx: ANGEL.x + 0.001, bz: ANGEL.z, r: 0.4, hose: false });
+  ctx.colliders.push({ type: 'box', x0: ANGEL.x - 0.31, x1: ANGEL.x + 0.31, z0: ANGEL.z - 0.34, z1: ANGEL.z + 0.34, hose: false }); // (the plinth, 0.64 × 0.57, turned; the wings start 1.6 m up)
   const api = { figure, moved: null };
-  fetch('assets/models/angel.bin').then((res) => res.arrayBuffer()).then((buf) => {
-    const head = new Float32Array(buf, 0, 8), count = head[0], tris = head[1], at = head.slice(2, 5), size = head.slice(5, 8);
-    let off = 32;
-    const q = new Uint16Array(buf, off, count * 3);
-    off += count * 6; off += (4 - (off % 4)) % 4;
-    const nor = new Int8Array(buf, off, count * 4);
-    off += count * 4;
-    const col = new Uint8Array(buf, off, count * 4);
-    off += count * 4;
-    const pos = new Float32Array(count * 3), n3 = new Int8Array(count * 3), c3 = new Uint8Array(count * 3), m1 = new Uint8Array(count);
-    for (let i = 0; i < count; i++) for (let k = 0; k < 3; k++) {
-      pos[i * 3 + k] = at[k] + (q[i * 3 + k] / 65535) * size[k];
-      n3[i * 3 + k] = nor[i * 4 + k];
-      c3[i * 3 + k] = col[i * 4 + k];
-      if (k === 0) m1[i] = col[i * 4 + 3];
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(n3, 3, true));
-    geo.setAttribute('color', new THREE.BufferAttribute(c3, 3, true));
-    geo.setAttribute('aMoss', new THREE.BufferAttribute(m1, 1, true));
-    geo.setIndex(new THREE.BufferAttribute(new Uint32Array(buf, off, tris * 3), 1));
+  new GLTFLoader().loadAsync('assets/models/angel.glb').then(({ scene }) => {
+    let src;
+    scene.traverse((o) => { if (o.isMesh) src = o; });
+    const m = figure.material, s = src.material;
+    for (const k of ['map', 'normalMap', 'roughnessMap']) { m[k] = s[k]; m[k].anisotropy = 8; } // (the roughness in its green, the metal off)
+    m.normalScale.copy(s.normalScale);
+    m.needsUpdate = true;
     blank.dispose();
-    figure.geometry = geo;
-    api.verts = count;
+    figure.geometry = src.geometry;
+    api.verts = src.geometry.attributes.position.count;
     api.moved?.();
   });
   return api;

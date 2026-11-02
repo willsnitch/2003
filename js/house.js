@@ -114,10 +114,14 @@ export function buildHouse(renderer, bedroomM, ctx) {
 
   // ---- materials
   const cool = coolRoom(renderer); // what the bathroom's glaze reflects: white, and the light in the ceiling
+  const fromWall = (tex) => { tex.offset.x = -B.x0 / T.PERIOD.tile; return tex; }; // (tiles counted along x from the bathroom's west wall)
   const mat = {
     plank: metric(std({ map: T.plankTex(), roughness: 0.48 }), T.PERIOD.plank),
     lino: metric(std({ map: T.linoTex(), roughness: 0.4 }), T.PERIOD.lino),
     tile: metric(std({ map: T.tileTex(), bumpMap: T.tileTex(true), bumpScale: 0.7, roughness: 0.1, envMap: cool, envMapIntensity: 0.32 }), T.PERIOD.tile),
+    // the same, for what is laid across the bathroom (its floor, its ceiling, the walls at its ends, the bath's front):
+    // the rows counted from its west wall, so they come out whole at both sides, none cut (user, 2026-11-02)
+    tileX: metric(std({ map: fromWall(T.tileTex()), bumpMap: fromWall(T.tileTex(true)), bumpScale: 0.7, roughness: 0.1, envMap: cool, envMapIntensity: 0.32 }), T.PERIOD.tile),
     siding: metric(std({ map: T.peelingSidingTex(), bumpMap: T.peelingSidingTex(true), bumpScale: 1.4, roughness: 0.9 }), 2.64), // (old white paint peeling off the boards: user, 2026-10-19)
     lawn: metric(std({ map: T.lawnTex(), roughness: 1 }), T.PERIOD.lawn),
     sand: metric(std({ map: T.sandTex(), roughness: 1 }), T.PERIOD.sand),
@@ -255,7 +259,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
     for (const [p0, p1] of [[a0, Math.min(a1, B.x0)], [Math.max(a0, B.x0), Math.min(a1, B.x1)], [Math.max(a0, B.x1), a1]]) {
       if (p1 - p0 < 1e-3) continue;
       const tiled = p0 >= B.x0 - 1e-3 && p1 <= B.x1 + 1e-3, outside = p0 >= B.x1 - 1e-3; // (past the bathroom its south face is out of doors)
-      solid(slab(p0, p1, y0, y1, south, south + t, faces(M.wall, { nz: mat.wallpaper, ...(tiled ? { pz: mat.tile } : outside ? { pz: mat.siding, px: mat.siding } : {}) })));
+      solid(slab(p0, p1, y0, y1, south, south + t, faces(M.wall, { nz: mat.wallpaper, ...(tiled ? { pz: mat.tileX } : outside ? { pz: mat.siding, px: mat.siding } : {}) })));
     }
   }, TOP);
   wallCollider(C.x0, DOORS.mum.x0, south, south + t);
@@ -362,12 +366,12 @@ export function buildHouse(renderer, bedroomM, ctx) {
   // ---------------------------------------------------------------- bathroom: long and narrow, tiled all over, white, no window
   solid(slab(B.x0 - t, B.x0, 0, TOP, B.z0, B.z1, faces(M.wall, { px: mat.tile })));
   solid(slab(B.x1, B.x1 + t, 0, TOP, south + t, B.z1, faces(M.wall, { nx: mat.tile }))); // (between the corridor's wall and its own end wall: see the dead end)
-  solid(slab(B.x0 - t, B.x1 + t, 0, TOP, B.z1, B.z1 + t, faces(M.wall, { nz: mat.tile })));
+  solid(slab(B.x0 - t, B.x1 + t, 0, TOP, B.z1, B.z1 + t, faces(M.wall, { nz: mat.tileX })));
   wallCollider(B.x0 - t, B.x0, B.z0, B.z1 + t);
   wallCollider(B.x1, B.x1 + t, south, B.z1 + t);
   wallCollider(B.x0 - t, B.x1 + t, B.z1, B.z1 + t);
-  g.add(flat(B.x0, B.x1, B.z0, B.z1, 0, mat.tile));
-  g.add(Object.assign(flat(B.x0 - IN, B.x1 + IN, B.z0 - IN, B.z1 + IN, H, mat.tile, false), { castShadow: true }));
+  g.add(flat(B.x0, B.x1, B.z0, B.z1, 0, mat.tileX));
+  g.add(Object.assign(flat(B.x0 - IN, B.x1 + IN, B.z0 - IN, B.z1 + IN, H, mat.tileX, false), { castShadow: true }));
   const bath = bathroom(g, M, mat, ctx, cool);
 
   // ---------------------------------------------------------------- kitchen and living room
@@ -1104,16 +1108,25 @@ function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, labe
     Object.assign(seg, { ax: hinge.x, az: hinge.z, bx: tip.x, bz: tip.z });
   };
   apply();
+  const turn = (open) => {
+    state.open = open;
+    state.target = open ? deg(95) : 0;
+    state.slam = false; // a hand on it now
+    ctx.sound.door(open, hinge);
+  };
+  let said = '';
   pivot.userData.interact = {
     label: () => (state.open && !locked ? `Close the ${label}` : `Open the ${label}`),
     use: () => {
+      said = '';
       if (locked) return;
-      state.open = !state.open;
-      state.target = state.open ? deg(95) : 0;
-      state.slam = false; // a hand on it now
-      ctx.sound.door(state.open, hinge);
+      // `before(opening)`, set from outside (the bathroom's: main.js): something that happens first, or not
+      // now — true, or what you think — instead of the door moving
+      const no = door.before?.(!state.open);
+      if (no) { said = no === true ? '' : no; return; }
+      turn(!state.open);
     },
-    say: () => locked ?? '',
+    say: () => locked ?? said,
   };
   ctx.interact.push(pivot);
   // a slab behind the leaf, a little bigger than it all round, for the lamps beyond it to see as solid (house.js
@@ -1122,7 +1135,8 @@ function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, labe
   const block = new THREE.Mesh(new THREE.BoxGeometry(lw + 0.06, lh + 0.05, 0.02), new THREE.MeshBasicMaterial());
   block.position.set(lw / 2, lh / 2 + 0.003, -lt / 2 - 0.012);
   pivot.add(block);
-  return { state, apply, seg, block };
+  const door = { state, apply, seg, block, turn, before: null };
+  return door;
 }
 
 const DOOR_EDGE = new THREE.MeshStandardMaterial({ color: 0xddd6c7, roughness: 0.85, envMapIntensity: 0.15 });
@@ -1746,7 +1760,7 @@ function bathroom(g, M, mat, ctx, cool) {
   const { x0, x1, z0, z1 } = B;
   // the bath across the far end, its front tiled like everything else
   const deep = 0.76, bz = z1 - deep, top = 0.56;
-  g.add(slab(x0, x1, 0, top - 0.04, bz, bz + 0.06, mat.tile));
+  g.add(slab(x0, x1, 0, top - 0.04, bz, bz + 0.06, mat.tileX));
   const tub = F.bathtub(mat.ceramic, mat.chrome, x1 - x0, deep, top);
   tub.position.set((x0 + x1) / 2, 0, bz + deep / 2);
   g.add(tub);

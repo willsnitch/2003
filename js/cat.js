@@ -16,7 +16,8 @@ const { lerp, clamp } = THREE.MathUtils;
 const WALK = 0.5, TROT = 1.15, TURN = 5.5, SWIM = 0.22;
 const BODY_UP = 0.47; // how far up from her feet she goes, swimming, helmet and all
 export const CLIPS = 24; // planes she can be cut by, in her boat or her diving bubble (boat.js)
-const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), DOWN = new THREE.Vector3(0, -1, 0);
+const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1), DOWN = new THREE.Vector3(0, -1, 0);
+const SHAKE = 1.1; // s, shaking herself dry ('shake': boat.js, her diving suit off with it)
 
 // ---------------------------------------------------------------- fur
 
@@ -638,7 +639,7 @@ export class Cat {
   /** In the middle of something that can't be broken off. */
   get committed() {
     const s = this.queue[0];
-    return !!this.air || s?.type === 'jump' || s?.type === 'line';
+    return !!this.air || s?.type === 'jump' || s?.type === 'line' || !!s?.hold; // (`hold`: boat.js, her suit coming off)
   }
 
   /** On her way after you. */
@@ -708,7 +709,7 @@ export class Cat {
     this.flick = 1;
     this.groom.on = false;
     this.sound.purr(this.mouthAt);
-    if (this.groundY > 0.1 || this.air || this.queue[0]?.type === 'jump') return;
+    if (this.groundY > 0.1 || this.air || this.queue[0]?.type === 'jump' || this.queue[0]?.hold) return;
     this.queue = [{ type: 'face', at: 'player' }, { type: 'pose', pose: 'sit', dur: between(4, 7), look: 'player' }];
     this.shy = 6; // being stroked is not a reason to run
   }
@@ -978,6 +979,43 @@ export class Cat {
     }
   }
 
+  /**
+   * The water going back with her in it (bath.js drain, boat.js): down she comes with it, paddling, drifting over to
+   * a clear patch of floor (`dive.carry` [x, z]), held up off anything under her till she is off it; on her feet
+   * once it is too shallow to swim in.
+   */
+  carriedDown(dt) {
+    const D = this.dive, [cx, cz] = D.carry;
+    this.queue = [];
+    this.air = null;
+    this.perch = null;
+    this.groom.on = false;
+    this.target = POSES.swim;
+    this.lookMode = 'ahead';
+    const S = (this.swimming ??= { q: [], speed: 0, pitch: 0, inside: false });
+    const dx = cx - this.pos.x, dz = cz - this.pos.z, d = Math.hypot(dx, dz), step = Math.min(d, 0.5 * dt);
+    if (d > 1e-4) {
+      this.pos.x += (dx / d) * step;
+      this.pos.z += (dz / d) * step;
+    }
+    let under = 0.04; // (swimming, her paws reach 4 cm under her)
+    for (const b of D.blocks) {
+      const m = 0.3, over = this.pos.x > b.x0 - m && this.pos.x < b.x1 + m && this.pos.z > b.z0 - m && this.pos.z < b.z1 + m;
+      if (over && b.top + 0.03 <= this.groundY + 0.02) under = Math.max(under, b.top + 0.03);
+    }
+    this.groundY = Math.max(under, Math.min(this.groundY, D.y1));
+    S.speed = 0;
+    S.pitch *= Math.exp(-dt * 3);
+    this.gait += dt * 2.4; // paddling, gently
+    this.speedNow = step / Math.max(dt, 1e-4);
+    if (this.groundY <= 0.0401 && D.y1 < -0.3) { // (under 25 cm of it: on her feet)
+      this.groundY = 0;
+      this.dive = null;
+      this.swimming = null;
+      this.queue = [{ type: 'pose', pose: 'stand', dur: 1, look: 'ahead' }];
+    }
+  }
+
   /** Whether her body, swimming with its feet at y, would be in block b (a box with a base and a top). */
   inBlock(b, x, y, z) {
     const m = 0.3; // half her length, turned any way
@@ -1134,14 +1172,14 @@ export class Cat {
   }
 
   think(dt) {
-    if (this.dive) return this.swimAlong(dt);
+    if (this.dive) return this.dive.carry ? this.carriedDown(dt) : this.swimAlong(dt);
     this.swimming = null;
     if (this.ride) return this.rideAlong(dt);
     this.aboard = null;
     const pl = this.player.pos;
     const s0 = this.queue[0];
     this.shy -= dt;
-    if (this.shy <= 0 && this.groundY === 0 && this.player.feet < 0.2 && !this.air && s0?.type !== 'jump' &&
+    if (this.shy <= 0 && this.groundY === 0 && this.player.feet < 0.2 && !this.air && s0?.type !== 'jump' && !s0?.hold &&
         Math.hypot(pl.x - this.pos.x, pl.y - this.pos.z) < 0.3) this.bolt();
 
     // you went into another room: after a moment, she follows — but not out of doors: while you are out in
@@ -1210,6 +1248,17 @@ export class Cat {
       case 'pose':
         done = this.holdPose(s, dt);
         break;
+      case 'shake': {
+        // shaking herself all over, quick, as a wet cat does (update); `then` early in it (boat.js: her suit gone)
+        if (!s.started) {
+          s.started = true;
+          this.target = POSES.stand;
+          this.lookMode = 'ahead';
+        }
+        if (s.then && s.t >= 0.15) { s.then(); s.then = null; }
+        done = s.t > SHAKE;
+        break;
+      }
       case 'jump': {
         const [tx, ty, tz] = s.to;
         const PREP = 0.42, AIR = 0.5, LAND = 0.22;
@@ -1339,8 +1388,15 @@ export class Cat {
     const swim = this.swimming;
     const pitch = air ? air.pitch : swim ? swim.pitch : P.pitch;
     const bob = Math.abs(Math.sin(this.gait)) * 0.006 * mb;
+    // shaking herself (a 'shake'): her body twisting to and fro about its length, her head with it a little ahead
+    // and further, her tail after; fast, as a wet cat does
+    const sh = this.queue[0]?.type === 'shake' && !swim && !air ? this.queue[0].t ?? 0 : -1;
+    const env = (a, b, c, e) => (sh < 0 ? 0 : THREE.MathUtils.smoothstep(sh, a, b) * (1 - THREE.MathUtils.smoothstep(sh, c, e)));
+    const w = sh * Math.PI * 2 * 7.5;
+    const bodyRoll = 0.3 * env(0, 0.12, 0.8, 1.1) * Math.sin(w), headRoll = 0.55 * env(0.15, 0.27, 0.75, 1.0) * Math.sin(w + 1.2); // (her head only once the glass round it has gone)
+    const tailShake = 0.45 * env(0.2, 0.35, 0.85, 1.1) * Math.sin(w - 1.4);
     R.spine.position.set(0, P.hipY + bob, -0.13);
-    R.spine.rotation.set(-pitch, 0, Math.sin(this.gait) * 0.035 * mb);
+    R.spine.rotation.set(-pitch, 0, Math.sin(this.gait) * 0.035 * mb + bodyRoll);
     R.spine.updateMatrix();
     R.chest.scale.setScalar(1 + Math.sin(t * 2.1) * 0.012);
 
@@ -1351,6 +1407,7 @@ export class Cat {
     q.setFromAxisAngle(X, pitch);
     q.multiply(_q.setFromAxisAngle(Y, this.lookYaw));
     q.multiply(_q.setFromAxisAngle(X, this.lookPitch));
+    if (headRoll) q.multiply(_q.setFromAxisAngle(Z, headRoll)).multiply(_q.setFromAxisAngle(Y, headRoll * 0.35));
 
     // washing: where the mouth is, in root space, for the raised paw to meet it
     const G = this.groom;
@@ -1410,7 +1467,7 @@ export class Cat {
     if (rnd() < dt * 0.25) this.flick = 1;
     this.flick = Math.max(0, this.flick - dt * 0.8);
     const sway = Math.sin(t * 1.4) * 0.07 + Math.sin(this.gait * 0.5) * 0.1 * mb + (swim ? Math.sin(t * 2.1) * 0.16 : 0);
-    R.tail[0].rotation.set(pitch + (air ? 0.4 : P.tailLift), sway, 0);
+    R.tail[0].rotation.set(pitch + (air ? 0.4 : P.tailLift), sway + tailShake, 0);
     for (let i = 1; i < R.tail.length; i++) {
       const tip = i / (R.tail.length - 1);
       R.tail[i].rotation.set(P.curlX, P.curlY * this.tailSide + sway * 0.6 + Math.sin(t * 6 + i) * 0.22 * this.flick * tip, 0);
@@ -1423,7 +1480,7 @@ export class Cat {
 
     if (dt > 0 && !air && !this.ride && !swim && this.groundY < 0.05) this.keepClear(dt);
     const after = this.pos.x + this.pos.z * 3 + this.yaw * 5 + this.groundY * 7;
-    return after !== before || drift > 0.004 || mb > 0.05 || !!air || G.blend > 0.02;
+    return after !== before || drift > 0.004 || mb > 0.05 || !!air || G.blend > 0.02 || sh >= 0;
   }
 }
 

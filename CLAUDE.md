@@ -50,9 +50,10 @@ house: `notes/world.md`. Read only the part you need.
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting restarts after each write: the last was 2026-11-02 (he called the build), so the
-    next round of edits is round 1. When a round brings a new playable block or completes a batch, propose the next
-    number and let him decide. Current: **0.5.6** (0.5.1–0.5.3: Mum; 0.5.6: the end of the garden).
+    round of the 5 it was. Counting restarts after each write: the last was 2026-11-02 (the bath's cycle and his
+    angel, written as 0.5.7, a number proposed to him); next is round 1. When a round brings a new playable block or
+    completes a batch, propose the next number and let him decide. Current: **0.5.6** (0.5.1–0.5.3: Mum; 0.5.6: the
+    end of the garden; 0.5.7 proposed).
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
 
@@ -108,14 +109,17 @@ house: `notes/world.md`. Read only the part you need.
   rim), `inventory.js` (I), `player.js`, `pc.js` (Macrofrost XD desktop), `cat.js` Luna (A* over the whole house,
   follows you room to room, perches, `keepClear`, `ride`, `dive`/`swimAlong`), `fur.js`, `audio.js`.
 - House: `house.js` (`PLAN`; bathroom, kitchen + living room, corridor with the attic hatch, locked front door, Mum's
-  door), `fixtures.js` (toilet, bath, basin, taps, sofa, TV, rug, ceiling lights…), `build.js` (metric UVs, walls with
-  holes, `bakeStatic`, shadow helpers), `bath.js` (taps: E on either turns both; filling, flood, underwater, the
-  floating towel), `boat.js` (Luna's boat, sou'wester, diving gear), `uvtorch.js` (beam held = on; the basin's traces
-  with the light off, switch by the bathroom door), `water.js` (the water's look; `RippleSim` — stir it with
-  `bath.disturb(x, z, amp, r)`), `mother.js` (Mum in the kitchen; how to work on her: `notes/history.md`, "Mum").
+  door; `hingedDoor` takes `before(opening)` and `turn(open)`), `fixtures.js` (toilet, bath, basin, taps, sofa, TV,
+  rug, ceiling lights…), `build.js` (metric UVs, walls with holes, `bakeStatic`, shadow helpers), `bath.js` (taps: E
+  on either turns both on, never off; filling, flood, underwater, the floating towel; `drain`: all of it back down the
+  plug hole), `boat.js` (Luna's boat, sou'wester, diving gear; on a drain the boat is sucked into the bath and she
+  shakes the suit off in a poof), `uvtorch.js` (beam held = on; the basin's traces with the light off, switch by the
+  bathroom door), `water.js` (the water's look; `RippleSim` — stir it with `bath.disturb(x, z, amp, r)`), `mother.js`
+  (Mum in the kitchen; how to work on her: `notes/history.md`, "Mum").
 - Outside: `yard.js` (garden, neighbours, street, flamingos, tap), `hose.js` (verlet rope), `grove.js` (the wood),
-  `pool.js` (the end of the garden, past the wood), `basement.js`. `tools/bake-angel.mjs` bakes the provisional angel
-  into `assets/models/angel.bin` (`node --max-old-space-size=6000 tools/bake-angel.mjs 0.0065`).
+  `pool.js` (the end of the garden, past the wood), `basement.js`. The angel is his Meshy model, `assets/models/angel.glb`, shrunk once in Blender
+  (decimate 30 %, the texture's seams and everything up to the feet locked — unlocked, the plinth's texture warped:
+  660k → 198k triangles; colour 8192 → 4096 px, normal 2048, roughness 1024; 80 → 15 MB).
 - Others: `daytime.js`, `textures.js` (all textures, canvas-drawn), `zelpa.js`, `zelpa-hud.js`.
 - **The house is raised** `LIFT` 0.75 over the yard, a porch `PORCH` 1.85 deep along the kitchen's back wall (to
   `PORCH_X1`; cellar doors on the house's wall east of it, hose tap and coil right of the back door). yard.js,
@@ -144,6 +148,8 @@ house: `notes/world.md`. Read only the part you need.
     in the house scene and she stops drawing; merge or drop a map first.
   - A mesh from surface nets or any generated field: check the winding against the normals (in the game you see its
     inside: "the face has gone"). `Math.hypot` is slow in a hot field. Custom samplers on sRGB textures return linear.
+  - Metric UVs count tiles and boards from world zero: a room whose walls are off that grid gets cut tiles at them —
+    give it its own material with the texture offset to its wall (house.js `fromWall`, the bathroom's `tileX`).
   - Under the floor (`basement.js`): Luna's `Nav` skips colliders with top ≤ 0.03; whatever the house scene has below
     the floor shows inside the basement (`cellar.passes`), so it keeps out of `UNDER`. basement.js burns 2711 draws of
     its shared RNG where the wooden doors were: anything new before the steps uses its own RNG, or the basement moves.
@@ -168,6 +174,8 @@ other preview of the game open; things fixed in a place he chose stay exactly th
   props.js, bath.js, pool.js, zelpa.js, boat.js, cat.js, basement.js, grove.js: 55–85 KB each): grep for the name,
   then read only the lines you need — the function, its helpers and the neighbours rule 1 asks you to compare with.
 - Filter long command output (harness, console, logs) with grep/tail.
+- A `javascript_tool` call that steps more than ~120 rendered frames of the house can time out halfway: step in
+  chunks, keep results in `window`.
 - Edit with exact, unique markers; when splicing with a script, search the end marker *after* the start.
 
 ## Open items (waiting on him)
@@ -181,9 +189,13 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - Deploy to Netlify (needs his go-ahead; the whole folder, not just `index.html`).
 - Before sale, licences for: `assets/family-portrait.jpg` (the corridor's photo; his edit with a black cat on the
   father's lap), `assets/calendar-photo.jpg` (a postcard credited "Photo by Frank Ogsbury"), `assets/hell-writing.jpg`
-  (the UV writing, stock-looking), `assets/models/mother.glb` (Meshy AI: terms depend on his plan), the font, and the
-  angel's model when it comes.
-- The angel at the pool: his model to come. Not checked yet: Luna in the end of the garden; fps there on his M2; the
+  (the UV writing, stock-looking), `assets/models/mother.glb` (Meshy AI: terms depend on his plan), the font, and
+  `assets/models/angel.glb` (Meshy AI, like Mum).
+- The angel at the pool: his model in (2026-11-02), 2.05 m to the wing tips on its plinth (size mine), not yet judged
+  by him. Not checked yet: Luna in the end of the garden; fps there on his M2; the
   drowned flamingo's empty eye in a close-up; the flamingos' eyes in direct sun.
+- The bath's cycle (2026-11-02), not yet seen by him in play: the lines "It won't turn." / "It won't budge." (mine),
+  the water running back up the bath's front and the whirl over the plug (mine), Luna's shake close up, the poof with
+  the light off. A 2 cm sliver of tile is left along the bathroom's door wall (only the sides were asked).
 - Mum's right fist (2026-10-25/27): not yet judged by him, above all the wrist, cocked ~45° towards the little
   finger while she cuts, up to ~60° as she puts the knife down.

@@ -160,3 +160,11 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
 - Iron table and three chairs in the weeds, one knocked over, their seat boards gone; tall irregular bushes all along the fence; thick trees outside
   it, boughs hanging in, grey moss on some; a provisional stone angel at the pool's end (a model of his to replace it).
 - The air conditioner's fan jams at random in three ways: it struggles, catches, breaks free. "Take the hose" only when pointing at the hose.
+
+## 0.5.7 — the bath's cycle and the stone angel (2026-11-02; number proposed, his to confirm)
+- 2 November (rounds 1–5): the bath's taps — E on either turns both on, and only with Luna in and the bathroom door
+  shut; the water rises (×1.25 from half height), the boat is sucked into the bath as it drains (8 s, all of it down
+  the plug hole), then the taps go off; no crouching while it drains; Luna shakes her diving suit off in a poof.
+  Bathroom tiles whole; the corridor ghost no longer breaks the wallpaper's seam. The angel at the pool's end is now
+  his own model (a figure on a two-step plinth, 2.05 m to the wing tips), made light for the game (80 → 15 MB)
+  with its feet, plinth and inscription exactly as in his model.

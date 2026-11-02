@@ -84,6 +84,7 @@ export function buildShell(scene, M) {
   g.add(floor);
   const ceil = plane(W, D, M.ceiling, W / 2, H, D / 2);
   ceil.rotation.x = Math.PI / 2;
+  ceil.castShadow = true; // (the low sun comes in over the walls' tops and down through it: a wedge of light along the top of the west wall, blind shut — user, 2026-11-02)
   g.add(ceil);
 
   // walls: boxes so the window reveal has depth and the sun is blocked everywhere else
@@ -372,7 +373,7 @@ export function buildEnvironment(renderer) {
   const env = new THREE.Scene();
   env.add(new THREE.Mesh(
     new THREE.BoxGeometry(8, 5, 8),
-    new THREE.MeshBasicMaterial({ color: 0x2c2016, side: THREE.BackSide })
+    new THREE.MeshBasicMaterial({ color: DAY.env.box ?? 0x2c2016, side: THREE.BackSide })
   ));
   const panel = (w, h, color, x, y, z, ry) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color }));
@@ -383,6 +384,7 @@ export function buildEnvironment(renderer) {
   panel(2.2, 1.9, new THREE.Color(...DAY.env.window), 0.2, 0.6, -3.95, 0);
   panel(3.4, 1.6, new THREE.Color(...DAY.env.wall), -3.95, 0.8, 0.4, Math.PI / 2);
   panel(1.0, 0.8, new THREE.Color(0.5, 1.4, 1.3), 3.9, -0.4, -1.2, -Math.PI / 2);
+  if (DAY.env.back) panel(3.4, 2.0, new THREE.Color(...DAY.env.back), 0, 0.5, 3.95, Math.PI); // the lit wall facing the window, thrown back onto the window's wall
   const pm = new THREE.PMREMGenerator(renderer);
   const tex = pm.fromScene(env, 0.05).texture;
   pm.dispose();

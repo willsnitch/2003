@@ -198,6 +198,17 @@ and the current state; `notes/world.md` the approved state of the yard and the h
   through them); clip planes on all her materials cut her paws too — give clipped parts their own materials; a boat
   "stuck" test must count only real movement (a deadlock with Luna in the doorway); Luna's off-limits cells that
   nobody can reach are traps she walks into.
+- **2026-11-02, the cycle** (state in `notes/world.md`, "The bath's cycle"): "when you open the bath's water you can't
+  close it" was a spec, not a bug report (rule 3) — a long test hunting a bug came first. The drain is a rewind: what
+  the water carried goes back where it was. The poof is cartoon on purpose ("cartoonish, not realistic vapour… little
+  clouds around, the classic animation of something vanishing"); a soft vapour cloud was turned down.
+- Lessons from it: swimming, the "head just breaks the surface" clamp ran after the floor clamp, so water going down
+  fast took you down through the floor ("the character crouches for some reason") — the floor clamp comes last. A
+  landing spot for Luna needs room for her helmet (0.42 m), not her walking radius (0.17): the toilet's cistern held
+  her up in the air. A boat righting itself as it slides needs its lowest hull point checked (a corner went 3 cm into
+  the tiles). Metric tiles count from world zero, so a room whose walls are off the grid gets cut tiles: its own
+  material, texture offset to its wall (`fromWall`). Soft canvas sprites: white on black as an `alphaMap` (a colour
+  map drawn on a cleared canvas gives dark rims).
 
 ## Sound (2026-10-05 → 15)
 
@@ -274,3 +285,7 @@ and the current state; `notes/world.md` the approved state of the yard and the h
   local receiver, Read the JPEG (`tools/harness.js` + `tools/snap-receiver.py` do this). If the pane is closed the
   page can have zero size: `resize_window` first.
 - Check motion frame by frame with a fake `performance.now` advanced 50 ms a frame.
+- A `javascript_tool` call stepping a few hundred rendered frames of the house times out ("Internal error") and may
+  stop halfway: step ≤ ~120 frames a call, keep results in `window`. Real keys in the pane work (`computer` key), but
+  unlocked the view follows the mouse: set yaw/pitch in the same batch, right before the key. `say('')` leaves the
+  last line up for its 3 s.

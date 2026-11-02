@@ -31,6 +31,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   const mouth = taps.group.localToWorld(taps.mouth.clone()), inlet = taps.group.localToWorld(taps.inlet.clone());
   // `boost`: how much harder the taps run — 2 once Luna is in her boat (boat.js), so the room fills twice as fast (user, 2026-10-16)
   const state = { hot: false, cold: false, level: bottom, heat: 0, spread: 0, flood: 0, boost: 1 };
+  let drainT = null; // all of it going back (drain): { t, secs, done, and where flood, spread and level started from }
+  const plugAt = new THREE.Vector3(at.x + tub.userData.plug, bottom, at.z);
 
   // ---- how water looks (user, 2026-10-16: as a big engine draws it — water.js): waves, rings, a planar
   // reflection with Fresnel, Snell's window from under it. The bath's water and the room's share it.
@@ -105,6 +107,13 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
     g.add(m);
     return m;
   });
+
+  // ---- going down the plug hole, plug and all (drain): a whirl over it, turning fast, wider as the bath empties
+  const whirl = new THREE.Mesh(new THREE.CircleGeometry(1, 36).rotateX(-Math.PI / 2), std({ color: 0xdfe8ea, alphaMap: whirlTex(), roughness: 0.05, metalness: 0, transparent: true, opacity: 0, envMap: env, envMapIntensity: 1.2, depthWrite: false }));
+  whirl.renderOrder = 3;
+  whirl.receiveShadow = true;
+  whirl.visible = false;
+  g.add(whirl);
 
   // ---- over the front once it is full, and the spread of it on the floor (user, 2026-10-15: more real).
   // The water wells over the rolled lip, runs across the bath's top in one sheet, round its front edge and
@@ -305,17 +314,21 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   wall.visible = false;
   g.add(wall);
 
-  // ---- the taps: E on either turns both on, or both off (user, 2026-10-19: not one at a time)
+  // ---- the taps: E on either turns both on (user, 2026-10-19: not one at a time), and once on they
+  // never turn off again (user, 2026-11-02)
   const run = ctx.sound.steady('bath-run', mouth), spill = ctx.sound.steady('bath-spill', new THREE.Vector3(at.x, 0.2, fz));
+  let stuck = false;
   for (const which of ['hot', 'cold']) {
     const head = taps[which];
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.08), new THREE.MeshBasicMaterial({ visible: false }));
     head.add(grip); // the cross is thin: something easier to point at
     head.userData.interact = {
       label: () => (state.hot || state.cold ? 'Turn off the taps' : 'Turn on the taps'),
+      say: () => (stuck ? "It won't turn." : ''), // (after use: whether it was already on, or not to be turned on yet)
       use: () => {
-        const on = !(state.hot || state.cold);
-        state.hot = state.cold = on;
+        stuck = state.hot || state.cold || !api.mayOpen(); // (`mayOpen`: main.js — only with Luna in here and the door shut)
+        if (stuck) return;
+        state.hot = state.cold = true;
         ctx.sound.sample('tap-turn', head.getWorldPosition(new THREE.Vector3()));
       },
     };
@@ -469,7 +482,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       planes?.forEach((p, i) => volumeU.uDry.value[i].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     },
   };
-  for (const m of [water, puddleMat, wall.material, column.material, sheet.material, curtainMat]) m.userData.noVolume = true; // the water itself
+  for (const m of [water, puddleMat, wall.material, column.material, sheet.material, curtainMat, whirl.material]) m.userData.noVolume = true; // the water itself
   const floaters = []; // things afloat that the towel keeps clear of: { on, x, z, yaw, hl, hw } (Luna's boat)
   // the ceiling light, once the water is up round it: the towel keeps away from it too
   floaters.push({ on: false, x: (room.x0 + room.x1) / 2, z: (room.z0 + room.z1) / 2, yaw: 0, hl: 0.17, hw: 0.17, lamp: true });
@@ -509,6 +522,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
     },
     /** What stands up into the room's water, as boxes (set by house.js): the floating duck drifts round them. */
     blocks: () => [],
+    /** Whether the taps may be turned on now (set by main.js). */
+    mayOpen: () => true,
     /** You (the Player, set by main.js): walking or swimming into the duck, you push it. */
     you: null,
     volume,
@@ -525,6 +540,22 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
     under: (p) => state.flood > 0.002 && inRoom(p.x, p.z) && p.y < state.flood,
     /** How high the water stands on the bathroom floor. */
     get flood() { return state.flood; },
+    /** Whether the water is going back (drain), and how many seconds of that are left. */
+    get draining() { return !!drainT; },
+    get drainLeft() { return drainT ? drainT.secs - drainT.t : 0; },
+    /** Whether it is up to the ceiling, as high as it goes. */
+    get atCeiling() { return state.flood >= ceiling - 0.013; },
+    /** The bath's top, and its plug hole (on its bottom). */
+    rim,
+    plug: plugAt,
+    /**
+     * All the water there is goes back the way it came, in `secs` (user, 2026-11-02: as the door is opened): down
+     * out of the room, off the floor back up over the front into the bath, and away down its plug hole, the plug in
+     * as it is; then the taps turn themselves off (user, 2026-11-02), and `done()`. They run on all the while till then.
+     */
+    drain(secs, done) {
+      drainT = { t: 0, secs, done, flood: state.flood, spread: state.spread, level: state.level, swirl: 0 };
+    },
     state,
     update(dt, time) {
       // the heads turn a quarter round to open
@@ -533,7 +564,34 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         head.rotation.z += (to - head.rotation.z) * (1 - Math.exp(-dt * 10));
       }
       const flow = (state.hot ? 1 : 0) + (state.cold ? 1 : 0);
-      if (flow) {
+      let backUp = false; // (draining: the floor's water running back up the bath's front)
+      if (drainT) {
+        // going back, fast: the room's water down to the floor, then what is on the floor back up over the front into
+        // the bath, then the bath down its plug hole, swirling round the plug
+        const D = drainT, k = Math.min(1, (D.t += dt) / D.secs), part = (a, b) => THREE.MathUtils.smoothstep(k, a, b);
+        state.flood = D.flood * (1 - part(0, 0.45));
+        state.spread = D.spread * (1 - part(0.45, 0.72));
+        state.level = THREE.MathUtils.lerp(D.level, bottom, part(0.68, 1));
+        backUp = D.spread > 0 && k > 0.4 && k < 0.74;
+        const going = THREE.MathUtils.smoothstep(k, 0.66, 0.72) * (1 - THREE.MathUtils.smoothstep(k, 0.95, 1));
+        whirl.visible = going > 0.01;
+        if (whirl.visible) {
+          D.swirl += dt * 11;
+          sim.disturb(plugAt.x + Math.cos(D.swirl) * 0.05, plugAt.z + Math.sin(D.swirl) * 0.05, 8 * dt, 0.03);
+          const r = 0.045 + 0.06 * part(0.68, 1);
+          whirl.position.set(plugAt.x, Math.max(state.level, bottom + 0.004) + 0.002, plugAt.z);
+          whirl.scale.set(r, 1, r);
+          whirl.rotation.y -= dt * 21; // (about three and a half times round a second, the way water goes down a plug hole here)
+          whirl.material.opacity = 0.75 * going;
+        }
+        if (k >= 1) {
+          drainT = null;
+          whirl.visible = false;
+          state.hot = state.cold = false;
+          ctx.sound.sample('tap-turn', taps.group.localToWorld(new THREE.Vector3())); // (silent until there is a recording)
+          D.done?.();
+        }
+      } else if (flow) {
         // the bath fills; what comes in hot warms what is there, what comes in cold cools it
         const room = rim - state.level, rise = ((rim - bottom) / ONE_TAP) * flow * dt;
         const into = Math.min(room, rise), depth = Math.max(0.001, state.level - bottom);
@@ -546,12 +604,12 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         // 2026-10-19: "the room must fill in the time it did before")
         if (rise > room - 1e-6) {
           if (state.spread < 1) state.spread = Math.min(1, state.spread + (flow * dt) / SPREAD);
-          else state.flood = Math.min(ceiling - 0.012, state.flood + RISE * flow * state.boost * dt); // up past the door's top, the door shut, to the ceiling
+          else state.flood = Math.min(ceiling - 0.012, state.flood + RISE * flow * state.boost * (state.flood >= ceiling / 2 ? 1.25 : 1) * dt); // up past the door's top, the door shut, to the ceiling; a quarter faster from halfway up (user, 2026-11-02)
         }
       } else state.heat = Math.max(0, state.heat - dt / 900); // cooling, slowly
       if (Math.abs(state.level - shapedAt) > 0.002) reshape();
       surface.visible = state.level > bottom + 0.002 && !whole;
-      const over = flow > 0 && state.level >= rim - 1e-4;
+      const over = drainT ? backUp : flow > 0 && state.level >= rim - 1e-4;
       // the column of water, thicker with both taps on, falling to the water or the enamel; once the
       // room's water is over the spout there is nothing falling to see
       const under = state.flood > mouth.y - 0.004;
@@ -614,8 +672,9 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       volumeU.uVTime.value = time;
       // over the front: it spreads along the lip once it starts, thins and stops when the taps do
       const fl = Math.max(0.003, state.flood);
-      spilling += ((over ? 1 : 0) - spilling) * (1 - Math.exp(-dt * (over ? 1.6 : 0.55)));
+      spilling += ((over ? 1 : 0) - spilling) * (1 - Math.exp(-dt * (over ? 1.6 : drainT ? 6 : 0.55))); // (going back, gone at once)
       spillAge = over ? spillAge + dt : spilling > 0.02 ? spillAge : 0;
+      if (backUp) spillAge = Math.max(spillAge, 6); // (all along the front at once, going back)
       spillU.uFlow.value = spilling;
       spillU.uCover.value = Math.min(1.2, spillAge / 5);
       spillU.uFloor.value = fl;
@@ -629,8 +688,9 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         }
       }
       spillU.uTime.value = time;
-      runs.offset.y = (runs.offset.y - dt * 0.45) % 1; // running down (v grows downstream)
-      ripples.offset.y = (ripples.offset.y - dt * 1.35) % 1;
+      const way = drainT ? -1 : 1; // (going back: up it, into the bath)
+      runs.offset.y = (runs.offset.y - way * dt * 0.45) % 1; // running down (v grows downstream)
+      ripples.offset.y = (ripples.offset.y - way * dt * 1.35) % 1;
       ripples.offset.x = Math.sin(time * 0.7) * 0.01;
       // the foam and the drops where it meets the floor's water
       const reach = Math.min(1, spillU.uCover.value * 0.85 + 0.03);
@@ -641,7 +701,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       churn.offset.y = (time * 0.6) % 1;
       band.scale.x = Math.max(0.02, Math.min(1, 2 * reach)); // as far along as the sheet has spread
       band.position.x = at.x - SPAN / 2 + SPAN * THREE.MathUtils.clamp(spillU.uOrigin.value, reach, 1 - reach);
-      if (sheet.visible) {
+      if (sheet.visible && !drainT) {
         spillDrops += dt * 30 * spilling * reach;
         while (spillDrops > 1) {
           spillDrops--;
@@ -655,6 +715,12 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
           d.m.scale.setScalar(0.001 + Math.random() * 0.0018);
           d.m.visible = true;
         }
+      }
+      if (whole && state.flood <= rim) { // down under the bath's top again (drain): the floor's water, as it spread
+        whole = false;
+        puddle.geometry = puddleGeo;
+        puddle.position.x = (floor.x0 + floor.x1) / 2;
+        puddle.position.z = (floor.z0 + floor.z1) / 2;
       }
       puddle.visible = state.spread > 0;
       spreadU.value = whole ? 2 : state.spread;
@@ -737,6 +803,45 @@ export function streamTex() {
 }
 
 /** A puff of steam: soft, white, nothing at its edge. */
+/** The whirl over a plug hole, as an alpha map: bright streaks curling in to the middle, four arms, none alike. */
+function whirlTex() {
+  return canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, w, h);
+    g.lineCap = 'round';
+    for (let arm = 0; arm < 4; arm++) {
+      for (let k = 0; k < 3; k++) {
+        const a0 = (arm / 4) * Math.PI * 2 + Math.random() * 0.5, curl = 2.2 + Math.random() * 0.9, wd = 2 + Math.random() * 4;
+        g.beginPath();
+        for (let i = 0; i <= 40; i++) {
+          const t = i / 40, r = (0.06 + 0.42 * t) * w, a = a0 + curl * (1 - t) + k * 0.12;
+          const x = w / 2 + Math.cos(a) * r, y = h / 2 + Math.sin(a) * r;
+          if (i) g.lineTo(x, y); else g.moveTo(x, y);
+        }
+        g.strokeStyle = `rgba(255,255,255,${0.25 + Math.random() * 0.35})`;
+        g.lineWidth = wd;
+        g.filter = `blur(${1 + k}px)`;
+        g.stroke();
+      }
+    }
+    g.filter = 'none';
+    // nothing at the rim, so it melts into the water round it; thick in the middle, where it goes down
+    g.globalCompositeOperation = 'multiply';
+    const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    gr.addColorStop(0, '#fff');
+    gr.addColorStop(0.6, '#999');
+    gr.addColorStop(1, '#000');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+    const core = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.09);
+    core.addColorStop(0, 'rgba(255,255,255,0.9)');
+    core.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = core;
+    g.fillRect(0, 0, w, h);
+  }, { data: true });
+}
+
 function puffTex() {
   return canvasTex(128, 128, (g, w, h) => {
     for (let i = 0; i < 9; i++) {
@@ -1090,6 +1195,16 @@ function rubberDuck(g, env, tub, front, room, floaters, ceiling, towel, blocks, 
   return {
     block: () => block,
     update(dt, time, flood) {
+      if (s.afloat && flood < deck - 0.02) {
+        // the water gone back (drain, user 2026-11-02): back on its corner of the edge as it was, as the towel goes
+        // back on its rail
+        Object.assign(s, { afloat: false, x: sx, z: sz, vx: 0, vz: 0, yaw: -2.45, spin: 0 });
+        duck.position.set(sx, deck, sz);
+        duck.rotation.set(0, -2.45, 0);
+        me.on = false;
+        block = null;
+        return;
+      }
       if (!s.afloat) {
         if (flood < deck + 0.012) return;
         s.afloat = true; // lifted off the edge by the water

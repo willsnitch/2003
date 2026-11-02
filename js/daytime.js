@@ -55,7 +55,11 @@ export const EVENING = {
   spillPower: 1.6, // (the room darker by six: what comes out of its door lit the corridor's carpet three times as bright as the room's own by the door, then still half as bright again — user, 2026-10-19, twice)
   window: { color: 0xd8d4d6, intensity: 1.2 },
   kitchen: { color: 0xdcd6d4, intensity: 0.8 },
-  env: { window: [8.7, 7.3, 5.4], wall: [1.3, 0.8, 0.42] },
+  // (what lights the bedroom's walls by their facing alone, near or far: the hot window lit the wall opposite it flat and
+  // pale, twice as bright as the rest, blind open or shut — user, 2026-11-02: "the rest is too dark in comparison". The
+  // window's light comes in by the glow; here only a warmer, dimmer window, and the room's own bounce: the box, the sunlit
+  // west wall, the lit wall facing the window)
+  env: { window: [3.6, 2.9, 2.0], wall: [1.9, 1.15, 0.6], box: 0x4a3322, back: [0.9, 0.68, 0.44] },
   tint: [1.04, 0.995, 0.925],
   dome: [[0, '#3a66aa'], [0.22, '#5885c0'], [0.38, '#8ea8cc'], [0.46, '#d2c5b4'], [0.5, '#e8cba4'], [0.51, '#8a8072'], [1, '#4a4339']],
   glowDisc: ['rgba(255,238,206,0.7)', 'rgba(255,214,164,0.26)', 'rgba(255,200,150,0)'],

@@ -492,6 +492,25 @@ function bathDoorBehind(dt) {
   D.onSlam = () => sound.sample('door-slam', bathShut.hinge.set(S.ax, 1, S.az)); // silent until there is a recording
   bathShut.armed = false;
 }
+// Nor can you shut it yourself, in there, till she is in too (user, 2026-11-02). And with water in the room (once it
+// is up to the ceiling), opening it first sends all the water back where it came from — off the floor into the bath
+// and down its plug hole, the plug in as it is — in 8 s (bath.js drain), and the taps go off; only then does it open.
+// The taps only turn on with her in here and the door shut.
+house.bath.mayOpen = () => cat.place.name === 'room' && house.roomAt(cat.pos.x, cat.pos.z) === 'bath' && !house.bathDoor.state.open && house.bathDoor.state.angle < 0.01;
+house.bathDoor.before = (opening) => {
+  const B = house.bath;
+  if (B.draining) return true; // (it is going: wait)
+  if (!opening) {
+    const here = house.roomAt(player.pos.x, player.pos.y) === 'bath';
+    const lunaIn = cat.place.name === 'room' && house.roomAt(cat.pos.x, cat.pos.z) === 'bath';
+    return here && bathShut.armed && !lunaIn ? "It won't budge." : null;
+  }
+  // and once the taps are on, it won't open at all till the water is up to the ceiling (user, 2026-11-02)
+  if ((B.state.hot || B.state.cold) && !B.atCeiling) return "It won't budge.";
+  if (B.state.spread <= 0 && B.flood <= 0.002) return null;
+  B.drain(8, () => house.bathDoor.turn(true));
+  return true;
+};
 
 // your own breath, under water: now and then a few bubbles out in front of your face, rising past
 const yourBubbles = bubbles(house.scene, 16, () => house.bath.flood);

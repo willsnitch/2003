@@ -367,6 +367,7 @@ export function bathtub(ceramic, chrome, L, Wd, Hh) {
   }
   g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(chain), 40, 0.0018, 5), chrome));
   g.userData.floor = floor;
+  g.userData.plug = px; // (along the bath, from its middle)
   g.userData.rim = Hh - 0.012;
   const prof = tub.userData.profile;
   g.userData.inside = (y) => {

@@ -1877,6 +1877,13 @@ export function wallpaperWearTex({ len, hgt, seed, seams = 0.53, stains = [], sc
       g.strokeStyle = `rgba(236,224,198,${0.25 + r() * 0.3})`; g.lineWidth = 0.8 + r() * 0.8;
       g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
     }
+    if (ghost) { // where a picture hung: none of the wear behind it, its colour a little stronger, dust along where the frame met the wall;
+      // before the seams, which ran on behind it (user, 2026-11-02: it broke the line)
+      const x = (ghost.x - ghost.w / 2) * S, y = yAt(ghost.y + ghost.h / 2), w = ghost.w * S, h = ghost.h * S;
+      g.save(); g.globalCompositeOperation = 'destination-out'; g.fillStyle = 'rgba(0,0,0,0.9)'; g.fillRect(x, y, w, h); g.restore();
+      g.fillStyle = 'rgba(170,124,80,0.13)'; g.fillRect(x, y, w, h);
+      g.strokeStyle = 'rgba(64,50,32,0.3)'; g.lineWidth = 2.5; g.strokeRect(x, y, w, h);
+    }
     for (let x = seams * (0.3 + r() * 0.5); x < len; x += seams) { // the seams: a hairline, the edge catching the light; lifting from the top on some
       const px = x * S;
       g.fillStyle = 'rgba(70,54,36,0.4)'; g.fillRect(px, 0, 1.3, H);
@@ -1900,12 +1907,6 @@ export function wallpaperWearTex({ len, hgt, seed, seams = 0.53, stains = [], sc
         g.fillStyle = gr; g.fill();
         g.strokeStyle = 'rgba(112,80,42,0.3)'; g.lineWidth = 1.6; g.stroke();
       }
-    }
-    if (ghost) { // where a picture hung: none of the wear behind it, its colour a little stronger, dust along where the frame met the wall
-      const x = (ghost.x - ghost.w / 2) * S, y = yAt(ghost.y + ghost.h / 2), w = ghost.w * S, h = ghost.h * S;
-      g.save(); g.globalCompositeOperation = 'destination-out'; g.fillStyle = 'rgba(0,0,0,0.9)'; g.fillRect(x, y, w, h); g.restore();
-      g.fillStyle = 'rgba(170,124,80,0.13)'; g.fillRect(x, y, w, h);
-      g.strokeStyle = 'rgba(64,50,32,0.3)'; g.lineWidth = 2.5; g.strokeRect(x, y, w, h);
     }
     for (let i = 0; i < tears; i++) { // torn away: the plaster, a ragged rim of paper fibre
       const cx = (0.4 + r() * (len - 0.8)) * S, cy = yAt(1.15 + r() * 0.25), rad = (0.015 + r() * 0.025) * S, pts = [];
@@ -7140,9 +7141,9 @@ export function poolWallTex(len, depth, water, marks = [], seed = 5151) {
         continue;
       }
       const grd = g.createLinearGradient(0, 0, 0, band * sy);
-      grd.addColorStop(0, `rgb(${Math.round(150 + v * 22)},${Math.round(184 + v * 18)},${Math.round(196 + v * 16)})`);
-      grd.addColorStop(0.75, `rgb(${Math.round(136 + v * 20)},${Math.round(170 + v * 16)},${Math.round(178 + v * 14)})`);
-      grd.addColorStop(1, `rgb(${Math.round(104 + v * 14)},${Math.round(128 + v * 12)},${Math.round(118 + v * 12)})`); // greener and dirtier at its foot
+      grd.addColorStop(0, `rgb(${Math.round(186 + v * 12)},${Math.round(205 + v * 10)},${Math.round(212 + v * 8)})`); // (paler: user, 2026-11-02)
+      grd.addColorStop(0.75, `rgb(${Math.round(174 + v * 12)},${Math.round(193 + v * 10)},${Math.round(199 + v * 9)})`);
+      grd.addColorStop(1, `rgb(${Math.round(130 + v * 10)},${Math.round(146 + v * 9)},${Math.round(141 + v * 9)})`); // greener and dirtier at its foot
       g.fillStyle = grd; g.fillRect(x0, 0, tw, band * sy);
       g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(x0 + 2, 2, tw * 0.5, band * sy * 0.4); // its glaze
       for (let k = 0; k < 3; k++) { g.fillStyle = `rgba(${r() < 0.5 ? '60,70,50' : '220,226,220'},${0.05 + r() * 0.08})`; g.beginPath(); g.ellipse(x0 + r() * tw, r() * band * sy, 2 + r() * 8, 1 + r() * 4, r() * 3, 0, Math.PI * 2); g.fill(); } // stains and lime

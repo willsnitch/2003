@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import * as T from './textures.js';
 import { bubbles as bubbleField } from './bubbles.js';
+import { canvasTex } from './util.js';
 
 const DEEP = 0.1; // the first row of tiles: deeper than this, it is boat water
 const std = (o) => new THREE.MeshStandardMaterial(o);
@@ -164,18 +165,130 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
     moving(D);
     return D;
   };
+  // where she comes down, the water going back from under her (bath.js drain): the nearest floor she could stand
+  // on (her own way about the house, cat.nav) with room for all of her, helmet and all, clear of everything
+  // standing here (cat.inBlock), the door's sweep, the boat wherever it lies, and you
+  const aside = [...standing, ...fixtures.filter((f) => f.sweep)].filter((f) => f.top > 0.03 && (f.base ?? 0) < 0.5);
+  const landing = (player) => {
+    let best = [cat.pos.x, cat.pos.z], bd = Infinity;
+    const hx = hull.bx - hull.ax, hz = hull.bz - hull.az, m = 0.42; // (the glass of her helmet out in front of her)
+    for (let x = B.x0 + m; x <= B.x1 - m; x += 0.05) { // (room to turn round, helmet and all)
+      for (let z = B.z0 + m; z <= B.z1 - m; z += 0.05) {
+        const dd = Math.hypot(x - cat.pos.x, z - cat.pos.z);
+        if (dd >= bd || !cat.nav.free(x, z) || Math.hypot(x - player.pos.x, z - player.pos.y) < 0.75) continue;
+        if (aside.some((f) => x > f.x0 - m && x < f.x1 + m && z > f.z0 - m && z < f.z1 + m)) continue;
+        if (boat.visible) {
+          const t = clamp(((x - hull.ax) * hx + (z - hull.az) * hz) / (hx * hx + hz * hz || 1), 0, 1);
+          if (Math.hypot(x - hull.ax - hx * t, z - hull.az - hz * t) < hull.r + 0.45) continue;
+        }
+        bd = dd;
+        best = [x, z];
+      }
+    }
+    return best;
+  };
+  const poof = poofCloud(scene, () => water.volume.light());
+  let shakeOff = false; // the water gone back with her still in her suit: she shakes it off
+
+  // ---- the water going back takes the boat with it (user, 2026-11-02): sucked along the floor to the bath — down
+  // the east side, clear of the basin and the toilet on the west wall — up its front and over, into it, and round
+  // and round down the plug hole, smaller and smaller, gone. Times from when it starts (as the floor is bared), stretched
+  // to end with the water (bath.js drainLeft):
+  const SUCK = [1.4, 1.75, 2.0, 3.0]; // along the floor, up the front, over into it, down the hole
+  const lane = B.x1 - WALL - HW, tubX = (B.x0 + B.x1) / 2, tubZ = (B.bathFront + B.z1) / 2;
+  let suck = null;
+  const sucked = (dt) => {
+    const S = suck, Q = S.times, t = (S.t += dt), e = (a, b) => THREE.MathUtils.smoothstep(t, a, b), turnTo = (a, b, k) => a + wrap(b - a) * k;
+    const lift = water.rim + 0.07; // (its keel clear of the bath's lip)
+    let x, y, z, yw, s = 1;
+    if (t < Q[0]) { // across to the lane, then down it, faster and faster
+      const a = Math.abs(lane - S.x), b = Math.abs(S.zEnd - S.z), d = (t / Q[0]) ** 2 * (a + b);
+      x = d < a ? lerp(S.x, lane, d / a) : lane;
+      z = d < a ? S.z : lerp(S.z, S.zEnd, (d - a) / Math.max(b, 1e-4));
+      y = S.y * (1 - e(0, 0.3));
+      yw = turnTo(S.yaw, S.yawZ, e(0, 0.9));
+    } else if (t < Q[1]) { // up the bath's front with the water, coming round across it
+      const k = e(Q[0], Q[1]);
+      x = lerp(lane, tubX, k);
+      z = lerp(S.zEnd, B.bathFront - HW - 0.03, k);
+      y = lift * k;
+      yw = turnTo(S.yawZ, S.yawX, k);
+    } else if (t < Q[2]) { // over, into it
+      x = tubX;
+      z = lerp(B.bathFront - HW - 0.03, tubZ, e(Q[1], Q[2]));
+      y = lift;
+      yw = S.yawX;
+    } else { // down onto the water left in it, and round and round down the hole
+      const u = Math.min(1, (t - Q[2]) / (Q[3] - Q[2])), k = THREE.MathUtils.smoothstep(u, 0.2, 0.9);
+      s = 1 - THREE.MathUtils.smoothstep(u, 0.25, 1);
+      if (s < 0.65) S.spin += dt * (3 + 16 * (0.65 - s) / 0.65); // (only once it is small enough to turn in there)
+      x = lerp(tubX, water.plug.x, k);
+      z = lerp(tubZ, water.plug.z, k);
+      y = Math.max(lerp(lift, water.state.level - DRAFT * s, e(Q[2], Q[2] + 0.3)), water.plug.y + 0.004);
+      yw = S.yawX + S.spin;
+    }
+    const tilt = 1 - e(0, 0.9);
+    boat.position.set(x, y, z);
+    boat.rotation.set(S.rx * tilt, yw, S.rz * tilt, 'YXZ');
+    boat.scale.setScalar(Math.max(s, 1e-3));
+    if (t < Q[1]) { // on the floor and coming upright: no corner of it down through the tiles
+      boat.updateMatrixWorld(true);
+      let low = Infinity;
+      const H = boat.userData.hull;
+      for (let i = 0; i < H.count; i++) low = Math.min(low, floor.fromBufferAttribute(H, i).applyMatrix4(boat.matrixWorld).y);
+      if (low < 0.002) boat.position.y += 0.002 - low;
+      y = boat.position.y;
+    }
+    at.set(x, 0, z);
+    yaw = yw;
+    const fx = Math.sin(yw) * (LEN / 2 - BEAM / 2) * s, fz = Math.cos(yw) * (LEN / 2 - BEAM / 2) * s;
+    Object.assign(hull, { ax: x - fx, az: z - fz, bx: x + fx, bz: z + fz, r: (BEAM / 2) * s, base: y - 0.05, top: y + 0.3 * s });
+    if (t >= Q[3]) { // gone: ready to come up out of the water again, should it ever be deep enough
+      suck = null;
+      mode = 'gone';
+      boat.visible = false;
+      boat.scale.setScalar(1);
+      boat.userData.dry.visible = true;
+      risen = sinkT = waited = 0;
+      Object.assign(hull, { ax: 1e4, az: 1e4, bx: 1e4, bz: 1e4, r: BEAM / 2, base: -9, top: -9 });
+    }
+  };
 
   return {
     boat,
     gear, // (her diving gear, and whether it fits somewhere: for checking them, tools/harness.js)
+    poof, // (the same)
     fits,
     update(dt, time, player) {
       const flood = water.flood;
       // she would not fit in it under the ceiling light now — or, a little before, she is up in her suit
-      const full = flood >= water.top - 0.012 || (gear.worn && flood >= water.top - 0.03); // (in her suit, in the boat or leapt out of it: the water stopped there, she swam nowhere — she stood in it)
+      const full = !water.draining && (flood >= water.top - 0.012 || (gear.worn && flood >= water.top - 0.03)); // (in her suit, in the boat or leapt out of it: the water stopped there, she swam nowhere — she stood in it)
       const lunaIn = cat.place.name === 'room' && inBath(cat.pos.x, cat.pos.z);
       const youIn = inBath(player.pos.x, player.pos.y);
       apart = youIn ? 0 : apart + dt;
+      poof.update(dt, cat.camera);
+
+      // ---- the water going back (bath.js drain, the door opened: user, 2026-11-02): swimming, or up in the water
+      // off the bow, down she comes with it onto a clear patch of floor (cat.carriedDown); still in her suit once
+      // it has all gone, she stands a moment (2 s), then shakes herself as a wet cat does, and the suit is gone in a puff
+      if (water.draining) {
+        shakeOff = gear.worn;
+        if (!cat.dive && gear.worn && lunaIn && !cat.ride && !cat.air && cat.queue[0]?.type !== 'jump' && cat.groundY > 0.05) cat.dive = dive(flood);
+        if (cat.dive) {
+          cat.dive.carry ??= landing(player);
+          cat.dive.y1 = Math.min(flood - 0.55, CEILING_ROOM);
+          moving(cat.dive);
+        }
+      } else if (shakeOff) {
+        if (!gear.worn || !lunaIn) shakeOff = false;
+        else if (!cat.dive && !cat.ride && !cat.air && !cat.committed && cat.groundY < 0.05) {
+          // turned to the door first, wherever she is (user, 2026-11-02), all within the 2 s (cat.js turns her at
+          // 0.7 × TURN, 3.85 rad/s)
+          const toDoor = Math.atan2(doorX - cat.pos.x, B.z0 - cat.pos.z), turning = Math.abs(wrap(toDoor - cat.yaw)) / 3.85;
+          cat.queue = [{ type: 'face', yaw: toDoor, hold: true }, { type: 'pose', pose: 'stand', dur: Math.max(0.3, 2 - turning), look: 'ahead', hold: true }, { type: 'shake', hold: true, then: () => { gear.on(false); poof.start(cat.rig.root); } }];
+          shakeOff = false;
+        }
+      }
 
       // a little before it is full, in her boat: her diving gear on first, the hat off (user, 2026-10-16);
       // out of the boat before it is on (you left), off again
@@ -221,6 +334,14 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       }
       gear.update(dt);
       water.volume.dry(null); // (set again below while it floats, dry inside)
+      if (water.draining && boat.visible && !suck && flood < 0.02 && !cat.ride) {
+        const yawZ = Math.abs(wrap(yaw)) < Math.PI / 2 ? 0 : Math.PI;
+        const f = Math.max(1, water.drainLeft / SUCK[3]);
+        suck = { t: 0, times: SUCK.map((v) => v * f), x: at.x, z: at.z, y: boat.position.y, yaw, yawZ, yawX: yawZ + Math.PI / 2, rx: boat.rotation.x, rz: boat.rotation.z, zEnd: B.bathFront - HL - 0.03, spin: 0 };
+        afloat.on = false;
+        boat.userData.dry.visible = false;
+      }
+      if (suck) { sucked(dt); return; }
 
       if (flood < DEEP && mode === 'gone') return;
       if (mode === 'gone') {
@@ -273,7 +394,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
           roll = 0.2 * k;
           pitch = -0.07 * k;
           boat.rotation.set(pitch, yaw, roll, 'YXZ');
-          boat.position.set(at.x, lerp(afloatY, 0, k), at.z);
+          boat.position.set(at.x, Math.min(lerp(afloatY, 0, k), Math.max(0, flood - DRAFT)), at.z); // (the water going back: down with it)
           // never lower than its lowest point anywhere on the hull (tilted, a corner of the stern goes deepest)
           boat.updateMatrixWorld(true);
           let low = Infinity;
@@ -311,8 +432,11 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
         } else aim.copy(rest);
       }
       if (mode === 'home') aim.copy(dock);
+      // the water gone from under it (drain): down on its keel on the floor, where it is
+      const aground = risen >= 1 && flood < DRAFT + 0.025;
       let d;
-      if (mode === 'ride' && intent.phase !== 'go') {
+      if (aground) d = Math.hypot(aim.x - at.x, aim.z - at.z);
+      else if (mode === 'ride' && intent.phase !== 'go') {
         // first she looks where she wants to go, then the boat comes round to it
         intent.t += dt;
         if (intent.phase === 'look' && intent.t > 1.4) intent.phase = 'turn';
@@ -344,6 +468,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       // afloat: bobbing, rocking, a little sunk for the cat in it
       const load = cat.ride ? 0.01 : 0;
       boat.position.set(at.x, flood - DRAFT - load + Math.sin(time * 1.4) * 0.006 - (1 - risen) * 0.3, at.z);
+      if (aground) boat.position.y = Math.max(boat.position.y, 0.001);
       // its wake: rings off the bow as it goes, now and then a soft one as it rocks where it is
       const speed = Number.isNaN(lastAt.x) ? 0 : Math.hypot(at.x - lastAt.x, at.z - lastAt.y) / Math.max(dt, 1e-3);
       lastAt.set(at.x, at.z);
@@ -356,7 +481,8 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
           wakeIn = 2.5 + Math.random() * 2;
         }
       }
-      boat.rotation.set(Math.sin(time * 1.1) * 0.02, yaw, Math.sin(time * 0.9 + 1) * 0.028, 'YXZ');
+      const rock = aground ? 0 : 1;
+      boat.rotation.set(Math.sin(time * 1.1) * 0.02 * rock, yaw, Math.sin(time * 0.9 + 1) * 0.028 * rock, 'YXZ');
       boat.updateMatrixWorld(true);
       if (boat.userData.dry.visible) water.volume.dry(boat.userData.inside.map((p, i) => dryPlanes[i].copy(p).applyMatrix4(boat.matrixWorld)));
       boat.localToWorld(deck.copy(SIT));
@@ -365,7 +491,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       Object.assign(afloat, { on: risen >= 1, x: at.x, z: at.z, yaw });
 
       // Luna: in, along for the ride, out
-      if (mode === 'wait' && lunaIn && !cat.ride && !cat.air && !cat.dive && risen >= 1 && !boarding) {
+      if (mode === 'wait' && lunaIn && !cat.ride && !cat.air && !cat.dive && risen >= 1 && !boarding && !aground) {
         const q = cat.queue[0];
         const far = Math.hypot(cat.pos.x - deck.x, cat.pos.z - deck.z);
         if (q?.type !== 'jump' && far < 1.0) {
@@ -399,6 +525,14 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
         mode = 'wait';
       }
       if (mode === 'home' && !cat.ride) mode = 'wait';
+      if (cat.ride && aground) {
+        // the water gone from under it: out she jumps onto the floor, clear of it, and the hat comes off
+        const [lx, lz] = landing(player);
+        cat.ride = null;
+        wear(false);
+        cat.queue = [{ type: 'jump', to: [lx, 0, lz], arc: 0.25, reach: 2.2 }, { type: 'pose', pose: 'stand', dur: 0.6, look: 'ahead' }];
+        mode = 'wait';
+      }
       if (cat.ride || mode === 'ride') {
         const looking = mode === 'ride' && intent.phase !== 'go';
         cat.ride = { x: deck.x, y: deck.y, z: deck.z, yaw, look: looking ? intent.look.set(aim.x, deck.y + 0.25, aim.z) : youIn ? 'player' : 'around', stand: gear.dressing || gear.worn };
@@ -1192,4 +1326,89 @@ function diveGear(cat, env = null, scene = null, water = null) {
     },
   };
   return state;
+}
+
+/**
+ * Poof (user, 2026-11-02: cartoonish, not real vapour; not one cloud but little clouds all round — the classic
+ * cartoon of something vanishing): small round puffs drawn as a cartoon draws them — white, a grey shade under each
+ * lump, a grey outline — pop up all round her (`start(root)`, her rig's root), one a moment after another, swelling
+ * with a little overshoot, drifting out, then shrinking away to nothing; no two alike. Seen by the room's light
+ * (`light()`), as the bath's steam is.
+ */
+function poofCloud(scene, light) {
+  const looks = Array.from({ length: 4 }, () => canvasTex(128, 128, (g, w, h) => {
+    const lumps = [[w / 2, h / 2 + 4, w * (0.2 + Math.random() * 0.04)]], n = 5 + Math.floor(Math.random() * 3), a0 = Math.random() * 6.28;
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.5, d = w * (0.16 + Math.random() * 0.05);
+      lumps.push([w / 2 + Math.cos(a) * d, h / 2 + 4 + Math.sin(a) * d * 0.8, w * (0.12 + Math.random() * 0.07)]);
+    }
+    const all = (grow, style, dx = 0, dy = 0, k = 1) => {
+      g.fillStyle = style;
+      for (const [x, y, r] of lumps) { g.beginPath(); g.arc(x + dx * r, y + dy * r, r * k + grow, 0, Math.PI * 2); g.fill(); }
+    };
+    g.clearRect(0, 0, w, h);
+    all(3.5, '#8d8982'); // the outline
+    all(0, '#cfcac1'); // the shade, under each lump…
+    g.save();
+    g.beginPath();
+    for (const [x, y, r] of lumps) { g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2); }
+    g.clip();
+    all(0, '#f4f2ed', -0.08, -0.16, 0.95); // …the white over it, a little up and to the left
+    g.restore();
+  }));
+  const puffs = Array.from({ length: 15 }, (_, i) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: looks[i % 4], alphaTest: 0.5 }));
+    m.material.userData.noVolume = true;
+    m.visible = false;
+    m.userData.p = { t: 9, delay: 0, grow: 0.12, fade: 0.4, life: 0.8, size: 0.15, v: new THREE.Vector3(), spin: 0 };
+    scene.add(m);
+    return m;
+  });
+  const back = (x) => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2; // (out a little past it, and back)
+  const at = new THREE.Vector3(), out = new THREE.Vector3(), mid = new THREE.Vector3();
+  let live = false;
+  return {
+    start(root) {
+      root.updateMatrixWorld(true);
+      root.localToWorld(mid.set(0, 0.2, 0.05));
+      puffs.forEach((m, i) => {
+        const p = m.userData.p, top = i >= 12; // a ring round her, and a few over her back
+        const a = (i / 12) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        if (top) at.set((Math.random() - 0.5) * 0.14, 0.36 + Math.random() * 0.1, -0.1 + (i - 12) * 0.14 + (Math.random() - 0.5) * 0.06);
+        else at.set(Math.cos(a) * 0.17 * (0.85 + Math.random() * 0.3), 0.08 + Math.random() * 0.26, 0.05 + Math.sin(a) * 0.32 * (0.85 + Math.random() * 0.3));
+        root.localToWorld(at);
+        out.subVectors(at, mid).setY(0.3 * Math.random()).normalize();
+        Object.assign(p, { t: 0, delay: Math.random() * 0.09, grow: 0.1 + Math.random() * 0.06, fade: 0.32 + Math.random() * 0.2, size: 0.12 + Math.random() * 0.1, spin: (Math.random() - 0.5) * 2 });
+        p.life = p.fade + 0.2 + Math.random() * 0.15;
+        at.y = Math.max(at.y, root.position.y + p.size * 0.62); // (popped up past its size, none of it down through the floor)
+        p.v.copy(out).multiplyScalar(0.25 + Math.random() * 0.2);
+        m.position.copy(at);
+        m.visible = false;
+      });
+      live = true;
+    },
+    update(dt, camera) {
+      if (!live) return;
+      live = false;
+      const seen = light();
+      for (const m of puffs) {
+        const p = m.userData.p;
+        if (p.t >= p.delay + p.life) { m.visible = false; continue; }
+        live = true;
+        p.t += dt;
+        const t = p.t - p.delay;
+        if (t < 0) continue;
+        p.v.multiplyScalar(Math.exp(-dt * 3));
+        m.position.addScaledVector(p.v, dt);
+        // popping up, past its size and back; then shrinking away to nothing
+        const k = t < p.grow ? back(t / p.grow) : 1 - THREE.MathUtils.smoothstep(t, p.fade, p.life);
+        const s = Math.max(1e-3, p.size * k);
+        m.scale.set(s, s, 1);
+        m.visible = k > 0.01;
+        if (camera) m.quaternion.copy(camera.quaternion);
+        m.rotateZ(p.spin * t);
+        m.material.color.setScalar(Math.min(1, seen));
+      }
+    },
+  };
 }
