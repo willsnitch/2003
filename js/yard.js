@@ -11,7 +11,7 @@ import { metric, slab, flat, pierced } from './build.js';
 import { DAY, AFTERNOON } from './daytime.js';
 import { gardenHose } from './hose.js';
 import { grove, GROVE } from './grove.js';
-import { poolGarden, END } from './pool.js';
+import { poolGarden, END, POOL, DROWNED } from './pool.js';
 import { takeable } from './props.js';
 import { projectDecal } from './fixtures.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -46,7 +46,7 @@ function inHouse(x, y, z, m) {
 export const CELLAR = { x0: 1.2, x1: 2.5, z0: -t - 1.5, z1: -t, sill: 0.12, side: 0.12, curb: 0.18, rise: 0.95 };
 
 /** Low over the yard (inside its fence, below `y`): where the trees round about must not hang down into. */
-const overYard = (x, z, m) => x > YF.x0 - m && x < YF.x1 + m && z > YF.z0 - m && z < YF.z1 + m;
+const overYard = (x, z, m) => x > YF.x0 - m && x < (z < YF.step + m ? YF.x2 : YF.x1) + m && z > YF.z0 - m && z < YF.z1 + m;
 
 /**
  * A two-sided cut-out lit as the ground or a crown is, from its own normal on both its faces: three.js
@@ -111,12 +111,13 @@ function bareness(x, z) {
 
 export function backYard(g, M, mat, ctx, scene, plan) {
   YF = plan.yard;
-  Y = { ...YF, z0: END }; // (user, 2026-10-29: the garden longer again, the pool past the wood — what was built to the old fence stays as it was)
+  Y = { ...YF, z0: END }; // (user, 2026-10-29: the garden longer again, the pool past the wood — what was built to the old fence stays as it was; 2026-11-01: wider there, to x2)
   ({ y: OY, z: OZ } = plan.offset ?? { y: 0, z: 0 });
   LIFT = -OY; PORCH = -OZ; PX1 = plan.porchX1 ?? Y.x1; WALL = -t + PORCH;
   for (const o of OURS) { o.z0 -= OZ; o.z1 -= OZ; o.top -= OY; } // (the house, where it is in this frame)
   OURS.push({ x0: Y.x0 - 0.1, x1: PX1 + 0.1, z0: -t - 0.1, z1: WALL, top: LIFT + 1.1 }); // and its porch
-  DZ = YF.z0 + 7.2; // (user, 2026-10-17: the garden longer, a grove at its end — and what was over the fence, as far again; 2026-10-29, and again)
+  DZ = YF.z0 + 7.2 - 3; // (3: room behind the far fence now for the trees along it, 2026-11-01)
+  // (user, 2026-10-17: the garden longer, a grove at its end — and what was over the fence, as far again; 2026-10-29, and again)
   BACK = { ...plan.backDoor, mid: (plan.backDoor.x0 + plan.backDoor.x1) / 2 };
   const r = mulberry32(301);
 
@@ -138,7 +139,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   const out = metric(std({ map: T.lawnTex(), roughness: 1, color: 0x8a8a7a }), T.PERIOD.lawn);
   // (right up to the lawn's edge: a 6 cm gap was left under the fence, and the sky showed through it between the
   // boards' feet, a strip of blue-green — user, 2026-10-21)
-  for (const [x0, x1, z0, z1] of [[-28, 28, -52, YF.z0], [-28, Y.x0, YF.z0, -t], [-28, Y.x0, -t, 30], [Y.x1, 28, YF.z0, -t + PORCH]]) g.add(flat(x0, x1, z0, z1, -0.005, out)); // (the last on along the porch's end to the house)
+  for (const [x0, x1, z0, z1] of [[-70, 70, -70, YF.z0], [-70, Y.x0, YF.z0, -t], [-70, Y.x0, -t, 30], [YF.x2, 70, YF.z0, END], [Y.x1, 70, END, -t + PORCH]]) g.add(flat(x0, x1, z0, z1, -0.005, out)); // (the last on along the porch's end to the house)
   longGrass(g, r, ground.map.image);
   const heapAt = leafHeaps(g, mulberry32(313), ground);
 
@@ -265,6 +266,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   const wood = grove(g, ctx, { yard: Y, wire, under });
   // ---- past the wood: the old paving, the iron table, the pool, the angel, the corner trees (pool.js)
   const past = poolGarden(g, M, ctx, { yard: YF, wire: lines, lit: bothFacesLit, merge: mergeAll });
+  drownedFlamingo(g, M, DROWNED.x, POOL.water, DROWNED.z);
   FLAMINGOS.forEach(([x, z, turn, roll, pitch, seed]) => {
     // in your way, the hose's and the water's (user, 2026-10-18: "the water goes through the flamingos"): its body,
     // as it leans, from its tail to its breast, and its two wire legs down into the lawn
@@ -352,7 +354,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   return {
     wood, swing, birdInTree, past, // (for checking)
     /** What to call when something out here has moved that throws a shadow (the spade taken, the sand dug). */
-    shadowsMoved: (fn) => { play.shadowsMoved(fn); hoseMoved = fn; }, // (and the hose off its hook or back on it: its shadow on the wall went with it — user, 2026-10-19)
+    shadowsMoved: (fn) => { play.shadowsMoved(fn); past.shadowsMoved(fn); hoseMoved = fn; }, // (and the hose off its hook or back on it: its shadow on the wall went with it — user, 2026-10-19)
     brighten(gain) {
       skyMat.color.setScalar(1.15 * gain);
       farMat.color.setRGB(DAY.far[0] * gain, DAY.far[1] * gain, DAY.far[2] * gain);
@@ -596,6 +598,41 @@ function longGrass(g, r, lawnPicture) {
   g.add(tufts);
 }
 
+/**
+ * A flamingo drowned in the pool (user, 2026-11-02): only its head out of the water and a bit of its neck, crooked, years in
+ * there — bleached, mould over it, a slime line where the water stands, one eye gone: on the side you see from the house,
+ * a hole where it was. The rest of it is under the water, which you can't see into.
+ */
+function drownedFlamingo(g, M, x, y, z) {
+  const F = FLAMINGO, ROUND = 32;
+  const paint = std({ map: T.mouldyFlamingoTex(243, F), color: 0xa39490, roughness: 0.86 }); // (dull: it looked lit by itself against the water)
+  const holder = new THREE.Group();
+  holder.position.set(x, y, z);
+  holder.rotation.set(deg(15), deg(205), deg(-17), 'YXZ'); // (its head towards the house's side and west; leaning right over)
+  g.add(holder);
+  const f = new THREE.Group();
+  f.position.set(-0.206, -0.782, 0); // (the water at this height of its neck: the head and its beak clear, a bit of neck)
+  holder.add(f);
+  const neck = loft(F.neck, (t) => along(F.neckR, t), (t) => along(F.neckR, t) * along(F.neckW, t), 170, ROUND);
+  const m = new THREE.Mesh(sideOn(neck.geo), paint);
+  m.castShadow = m.receiveShadow = true;
+  f.add(m);
+  const at = neck.curve.getPoint(F.eye), tan = neck.curve.getTangent(F.eye), ux = -tan.y, uy = tan.x, a = along(F.neckR, F.eye), b = a * along(F.neckW, F.eye), c = Math.cos(1.0), sn = Math.sin(1.0);
+  const spot = (s, k = 0.95) => new THREE.Vector3(at.x + ux * a * c * k, at.y + uy * a * c * k, s * b * sn * k);
+  // the eye it still has, dull and dirty
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.009, 16, 12), fourOClockSun(std({ color: new THREE.Color(0xe8c23a).multiplyScalar(0.55), roughness: 0.85 })));
+  eye.position.copy(spot(1));
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.0045, 12, 8), M.blackPlastic);
+  pupil.position.copy(eye.position).add(new THREE.Vector3(ux * 0.002, uy * 0.002, 0.007));
+  // where the other was: the hole it came out of, black, its rim of plastic a little raised, a dirty run down from it
+  const hole = new THREE.Mesh(new THREE.SphereGeometry(0.0115, 14, 10).scale(1, 1, 0.5), std({ color: 0x070605, roughness: 1 }));
+  hole.position.copy(spot(-1, 0.985));
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.0122, 0.002, 6, 18), paint);
+  rim.position.copy(hole.position);
+  rim.lookAt(hole.position.clone().add(new THREE.Vector3(ux * c, uy * c, -sn)));
+  for (const o of [eye, pupil, hole, rim]) { o.receiveShadow = true; f.add(o); }
+}
+
 /** Geometries into one (all with the same attributes). */
 function mergeAll(list) {
   const pos = [], nor = [], uv = [], idx = [];
@@ -824,23 +861,34 @@ function poles(g, M) {
   // the trees are tall now) to a hook in the wall under the eaves, by the bedroom's corner: it passes under
   // the gutter, not through it
   const from = new THREE.Vector3(8 - 0.75, 8.6, zHouse), to = new THREE.Vector3(3.6, 2.3 - OY, -t - 0.07 - OZ); // (the hook on the house: where the house is in this frame)
-  // the pole it hangs from, stood in the east neighbour's garden now, fed by a span from the alley's (2026-10-29: the
-  // alley went back with the far fence; the line to the house, and the grove that grew round it, stay as they were)
-  g.add(cyl(0.11, 0.14, 9, wood, from.x + 0.02, 4.5, zHouse - 0.02, 10));
-  g.add(slab(from.x - 0.35, from.x + 0.35, 8.4, 8.52, zHouse - 0.06, zHouse + 0.06, wood));
-  g.add(cyl(0.035, 0.035, 0.12, std({ color: 0x5f7d6a, roughness: 0.3 }), from.x, 8.6, zHouse, 8));
-  const spanA = new THREE.Vector3(8 - 0.75, 8.66, z), spanB = new THREE.Vector3(from.x, 8.66, zHouse);
-  const span = new THREE.QuadraticBezierCurve3(spanA, spanA.clone().add(spanB).multiplyScalar(0.5).add(new THREE.Vector3(0, -0.5, 0)), spanB);
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(span, 40, 0.008, 4, false), wire));
+  // (2026-11-01: the garden wider past the wood took in where it came from. The line to the house stays exactly where it
+  // ran, the grove having grown round it; it now starts from a pole of its own just outside the fence's step, fed along
+  // that fence from a pole further east, and that from the alley)
+
   const sag = from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(0, -1.2, 0));
   const line = new THREE.QuadraticBezierCurve3(from, sag, to);
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(line, 48, 0.01, 4, false), wire));
+  const cut = (END + 0.4 - from.z) / (to.z - from.z), feed = line.getPoint(cut), kept = [];
+  for (let k = 0; k <= 40; k++) kept.push(line.getPoint(cut + ((1 - cut) * k) / 40));
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(kept), 48, 0.01, 4, false), wire));
+  const stub = (x, zz, top) => {
+    g.add(cyl(0.1, 0.13, top, wood, x + 0.02, top / 2, zz - 0.02, 10));
+    g.add(slab(x - 0.3, x + 0.3, top - 0.2, top - 0.09, zz - 0.055, zz + 0.055, wood));
+    g.add(cyl(0.035, 0.035, 0.12, std({ color: 0x5f7d6a, roughness: 0.3 }), x, top - 0.03, zz, 8));
+  };
+  const eastX = 18 - 0.75;
+  stub(feed.x, feed.z, feed.y + 0.05);
+  stub(eastX, feed.z, feed.y + 0.05);
+  const hung = (a, b, drop) => new THREE.QuadraticBezierCurve3(a, a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, -drop, 0)), b);
+  const spanE = hung(feed.clone().setY(feed.y + 0.06), new THREE.Vector3(eastX, feed.y + 0.06, feed.z), 0.45), spanA = hung(new THREE.Vector3(eastX, feed.y + 0.06, feed.z), new THREE.Vector3(eastX, 8.66, z), 0.5);
+  for (const c of [spanE, spanA]) g.add(new THREE.Mesh(new THREE.TubeGeometry(c, 36, 0.008, 4, false), wire));
   const hook = std({ color: 0x2a2826, metalness: 0.5, roughness: 0.6 });
   g.add(slab(to.x - 0.03, to.x + 0.03, to.y - 0.05, to.y + 0.05, -t - 0.012 - OZ, -t - OZ, hook)); // its plate on the wall
   g.add(cyl(0.006, 0.006, 0.07, hook, to.x, to.y, -t - 0.045 - OZ, 6).rotateX(Math.PI / 2));
   g.add(cyl(0.016, 0.02, 0.03, std({ color: 0x3d4a40, roughness: 0.35 }), to.x, to.y - 0.01, -t - 0.075 - OZ, 10)); // the insulator
   const pts = line.getSpacedPoints(48);
-  pts.span = span.getSpacedPoints(40);
+  // (what else is overhead now, for what grows out there to keep off)
+  pts.span = [...kept, ...spanE.getSpacedPoints(24), ...spanA.getSpacedPoints(16).slice(1)]; // (no point twice: a length of nothing made the distance to the line NaN, and every leaf went)
+  for (let x = -10; x <= 18; x += 0.7) pts.span.push(new THREE.Vector3(x, 8.3, z));
   return pts;
 }
 
@@ -861,14 +909,17 @@ function sunGlowTex(stops) {
 function fence(g, mat, ctx, r0) {
   const HIGH = 1.8, WIDE = 0.14, GAP = 0.012;
   // (2026-10-29: the far side moved out past the pool, its boards as they were; each side carried on from where it ended,
-  // the new lengths with their own dice, after the old — the old boards, their shades, leans and knot holes, unchanged)
+  // the new lengths with their own dice, after the old — the old boards, their shades, leans and knot holes, unchanged.
+  // 2026-11-01: past the wood the yard is wider: the east side turns out along `step` to x2, down, and back along the far side)
   const r2 = mulberry32(5311);
   const runs = [
     { a: [YF.x0, YF.z0], b: [YF.x1, YF.z0], inward: [0, 1] }, // the far side
     { a: [Y.x0, -t - 0.06], b: [Y.x0, Y.z0], inward: [1, 0] }, // the west side, to the porch's corner (the porch's side on to the house)
     { a: [Y.x1, Y.z0], b: [Y.x1, Y.z1], inward: [-1, 0] }, // the east side
     { a: [Y.x0, Y.z0], b: [YF.x0, YF.z0], inward: [1, 0], r: r2, first: false }, // and on, past the wood
-    { a: [YF.x1, YF.z0], b: [Y.x1, Y.z0], inward: [-1, 0], r: r2, last: false },
+    { a: [YF.x1, YF.z0], b: [YF.x2, YF.z0], inward: [0, 1], r: r2, first: false }, // the far side, on to the east
+    { a: [YF.x2, YF.z0], b: [YF.x2, END], inward: [-1, 0], r: r2 }, // the east side there
+    { a: [YF.x2, END], b: [Y.x1, END], inward: [0, -1], r: r2, last: false }, // and back along the step to the old east side
   ];
   const boards = [];
   for (const run of runs) {

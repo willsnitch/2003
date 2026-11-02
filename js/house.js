@@ -37,7 +37,7 @@ export const PLAN = {
   bath: { x0: 3.34, x1: 4.94, z0: D + 2 * t + 1.2, z1: 20.2 }, // long and narrow — far too long (user, 2026-10-19: "much longer, the bath far away"): 14.5 m, the bath at its end
   living: { x0: -5.16, x1: -t, z0: 0, z1: 9 }, // kitchen at the north end, living room at the south
   kitchenTo: 3.9, // where the kitchen's floor gives way to the living room's
-  yard: { x0: -5.16 - t, x1: W + t, z0: -27.6, z1: -t }, // (6.8 m longer, for the grove at its end: user, 2026-10-17; 13.6 m more for the pool past it, 2026-10-29 — pool.js)
+  yard: { x0: -5.16 - t, x1: W + t, z0: -22.2, z1: -t, x2: 9.3, step: -14.0 }, // (6.8 m longer, for the grove at its end: user, 2026-10-17; past the wood, from `step` on, 8.2 m more and wider to the east, to x2, for the pool: 2026-11-01, his sketch — pool.js)
 };
 const C = PLAN.corridor, B = PLAN.bath, L = PLAN.living, Y = PLAN.yard;
 const DOORS = {
@@ -674,7 +674,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
       if (x > C.x0 && x < C.x1 && z > C.z0 && z < C.z1) return 'corridor';
       if (x > B.x0 && x < B.x1 && z > B.z0 && z < B.z1) return 'bath';
       if (x > L.x0 && x < L.x1 && z > L.z0 && z < L.z1) return 'living';
-      if (x > Y.x0 && x < Y.x1 && z > Y.z0 - PORCH && z < -t) return 'yard'; // (the porch too: out of doors)
+      if (x > Y.x0 && x < (z < Y.step - PORCH ? Y.x2 : Y.x1) && z > Y.z0 - PORCH && z < -t) return 'yard'; // (the porch too: out of doors)
       return null;
     },
     /** The floor Luna can get about on: every room of the house but Mum's, and the doorways between (not the yard). */
@@ -800,7 +800,7 @@ function outdoorLight(scene, color, dir, middle, size = 2048) {
   // way the light sees them (across it: left/right, cam.x = dir × up; up it: bottom/top)
   const x = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize(), y = new THREE.Vector3().crossVectors(x, dir);
   const ext = [Infinity, -Infinity, Infinity, -Infinity], p = new THREE.Vector3();
-  for (const px of [-8.0, 8.0]) for (const py of [-LIFT, 17.5]) for (const pz of [Y.z0 - PORCH - 3.0, B.z1 + 0.7]) { // (the wood's tall crowns; the yard where it is now)
+  for (const px of [-8.0, 13.0]) for (const py of [-LIFT, 17.5]) for (const pz of [Y.z0 - PORCH - 5.0, B.z1 + 0.7]) { // (the wood's tall crowns; the yard where it is now)
     p.set(px, py, pz).sub(middle);
     const u = p.dot(x), v = p.dot(y);
     ext[0] = Math.min(ext[0], u); ext[1] = Math.max(ext[1], u); ext[2] = Math.min(ext[2], v); ext[3] = Math.max(ext[3], v);
@@ -809,7 +809,7 @@ function outdoorLight(scene, color, dir, middle, size = 2048) {
   // its depth: from just short of the nearest corner of all that, 59 m deep as it always was (the bias below is a
   // fraction of that: the same in metres)
   let near = Infinity;
-  for (const px of [-8.0, 8.0]) for (const py of [-LIFT, 17.5]) for (const pz of [Y.z0 - PORCH - 3.0, B.z1 + 0.7]) near = Math.min(near, p.set(px, py, pz).sub(l.position).dot(dir));
+  for (const px of [-8.0, 13.0]) for (const py of [-LIFT, 17.5]) for (const pz of [Y.z0 - PORCH - 5.0, B.z1 + 0.7]) near = Math.min(near, p.set(px, py, pz).sub(l.position).dot(dir));
   cam.near = Math.max(1, near - 1);
   cam.far = cam.near + 59;
   // (margins of a few millimetres: at 3.5 cm deep and 3 along the surface, with the sun 15° up every shadow on the
@@ -878,6 +878,55 @@ function coolRoom(renderer) {
 }
 
 // ---------------------------------------------------------------- doors, windows, fittings
+
+const FAN_SPEED = 0.9; // (the air conditioner's fan, radians a second)
+/**
+ * One jam of the fan, as lengths of time each with its speed (`v(u)`, u 0…1 along it), by dice `r`. It may catch sharply and break free
+ * sharply, but it never stops out of nothing: first it shows it is struggling, dragging and uneven (user, 2026-11-02). 0 it drags a
+ * moment, catches, breaks free at once; 1 it struggles for longer, hesitating, catches, kicks and sticks again, then goes; 2 it
+ * runs down slower and slower, catches hard, stays stuck a good while, then breaks free and races before it settles.
+ */
+function fanJam(r) {
+  const ease = (u) => u * u * u * (u * (u * 6 - 15) + 10), N = FAN_SPEED, kind = Math.floor(r() * 3), parts = [];
+  const lerp = (dur, a, b) => parts.push([dur, (u) => a + (b - a) * ease(u)]);
+  const still = (dur) => parts.push([dur, () => 0]);
+  const drag = (dur, level, beats, dip) => parts.push([dur, (u) => level * (1 - dip * Math.sin(Math.PI * beats * u) ** 2)]); // (uneven, labouring round)
+  if (kind === 0) {
+    const low = N * (0.5 + r() * 0.2);
+    lerp(0.5 + r() * 0.4, N, low);
+    drag(0.5 + r() * 0.8, low, 1 + Math.floor(r() * 2), 0.3 + r() * 0.25);
+    lerp(0.14 + r() * 0.14, low, 0);
+    still(0.25 + r() * 0.8);
+    lerp(0.1 + r() * 0.08, 0, N * 1.25);
+    lerp(0.4 + r() * 0.3, N * 1.25, N);
+  } else if (kind === 1) {
+    const low = N * (0.42 + r() * 0.2);
+    lerp(0.5 + r() * 0.4, N, low);
+    drag(1.2 + r() * 1.5, low, 2 + Math.floor(r() * 3), 0.45 + r() * 0.3);
+    lerp(0.14 + r() * 0.12, low, 0);
+    still(0.35 + r() * 0.7);
+    const kick = 0.75 + r() * 0.5; // (a kick that doesn't take)
+    lerp(0.08 + r() * 0.05, 0, kick);
+    lerp(0.15 + r() * 0.12, kick, 0);
+    still(0.3 + r() * 0.7);
+    lerp(0.1 + r() * 0.08, 0, N * 1.2);
+    lerp(0.4 + r() * 0.3, N * 1.2, N);
+  } else {
+    const low = N * (0.2 + r() * 0.12), surge = N * (1.5 + r() * 0.4);
+    lerp(1 + r() * 0.8, N, low);
+    drag(0.4 + r() * 0.5, low, 1, 0.4 + r() * 0.3);
+    lerp(0.1 + r() * 0.08, low, 0);
+    still(1.8 + r() * 2.8);
+    lerp(0.1 + r() * 0.06, 0, surge);
+    lerp(1 + r() * 0.8, surge, N);
+  }
+  return parts;
+}
+/** The fan's speed `s` seconds into a jam; null when it is over. */
+function fanJamSpeed(parts, s) {
+  for (const [dur, v] of parts) { if (s < dur) return v(s / dur); s -= dur; }
+  return null;
+}
 
 /**
  * A door in a wall, made like the bedroom's: casing on both faces, the jambs lined, a panelled
@@ -2199,21 +2248,21 @@ function airConditioner(g, ctx, x, y, wall) {
     put(bg.rotateZ((k / 3) * Math.PI * 2 + 0.4), blade, fan).castShadow = false;
   }
   put(new THREE.CylinderGeometry(0.042, 0.044, 0.02, 32).rotateX(Math.PI / 2), std({ color: 0xd2cab2, roughness: 0.6 }), fan).castShadow = false; // the hub, pale
-  // it turns slowly, on its own; now and then it catches, slows to a stop, and goes on with a jerk (user, 2026-10-29)
-  const r = mulberry32(9421);
-  let angle = 0, speed = 0.9, next = 5, stuck = null;
+  // it turns slowly, on its own, never quite evenly; every so often, after no set time, it jams (fanJam). Only its speed is ever set:
+  // sharp as a catch is, the blades never skip from one place to another
+  fan.name = 'ac-fan';
+  let angle = 0, jam = null, jamT = 0, next = 5 + Math.random() * 10;
   ctx.animated.push((t, dt) => {
     if (!dt) return;
-    if (!stuck && t > next) stuck = { at: t, hold: 0.35 + r() * 0.6, jump: 0.4 + r() * 0.5 };
-    let extra = 0;
-    if (stuck) {
-      const s = t - stuck.at;
-      if (s < stuck.hold) speed = 0.9 * Math.max(0, 1 - s / (stuck.hold * 0.6)); // catching
-      else if (s < stuck.hold + 0.09) extra = stuck.jump * ((s - stuck.hold) / 0.09) ** 2; // and the jerk free
-      else { angle += stuck.jump; speed = 0.9; stuck = null; next = t + 4 + r() * 10; }
+    if (!jam && t > next) { jam = fanJam(Math.random); jamT = 0; }
+    let speed = FAN_SPEED;
+    if (jam) {
+      jamT += dt;
+      speed = fanJamSpeed(jam, jamT);
+      if (speed === null) { speed = FAN_SPEED; jam = null; next = t + 4 + 30 * Math.random() ** 1.6; }
     }
-    angle += speed * dt;
-    fan.rotation.z = -(angle + extra);
+    angle += speed * (1 + 0.05 * Math.sin(t * 0.7) + 0.03 * Math.sin(t * 1.9 + 1)) * dt;
+    fan.rotation.z = -angle;
   });
   const wire = [], dome = (rr) => ZF + 0.004 + 0.016 * (1 - (rr / FR) ** 2);
   for (let rr = 0.035; rr <= FR + 0.001; rr += 0.019) wire.push(new THREE.TorusGeometry(rr, 0.0017, 4, Math.max(24, Math.round(rr * 300))).translate(FX, FY, dome(rr)));

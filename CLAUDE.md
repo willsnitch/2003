@@ -60,9 +60,11 @@ Long history and the reasons behind decisions: `notes/history.md` (big — read 
     a third number per batch of refinements (0.4.3, …). Write them **once every 5 rounds of edits** (user, 2026-10-23:
     not after each one): at the 5th, add the points of all 5, in English and short, to the version in progress (the one
     exception to rule 13); in between, say in the reply which round of the 5 it was. Counting restarts after each write:
-    the last was 2026-10-27 (he asked to write the one round since early, before changing chat), so the next round of
-    edits is round 1. When a round brings a new playable block, or a batch of refinements is complete,
-    propose the next number and let him decide. Current: **0.5.3** (user, 2026-10-27; 0.5.1–0.5.3: Mum).
+    the last was 2026-11-02 (he called the build), so the next round of edits is round 1. When a round brings a new
+    playable block, or a batch of refinements is complete, propose the next number and let him decide. Current: **0.5.6**
+    (user, 2026-11-02; 0.5.1–0.5.3: Mum; 0.5.6: the end of the garden; he went from 0.5.3 straight to 0.5.6).
+15. **Repeated details are each different** (user, 2026-11-02: "they all have the same cut"): cracks, breaks, chips, placements of
+    anything there are many of get their own dice one by one, not a few shapes reused — unless he fixes counts and places (rule 12).
 
 ## Quality bar — how he judges (learned round after round)
 
@@ -143,6 +145,8 @@ Long history and the reasons behind decisions: `notes/history.md` (big — read 
   (canvas-drawn, no image files) · `js/zelpa.js`, `js/zelpa-hud.js` the TV game · `js/mother.js` Mum in the kitchen
   (pose set by hand each frame, IK arms, the fist as staged morph targets; how we worked on her and how to check her:
   `notes/history.md`, 2026-10-23/27).
+- `js/pool.js` the end of the garden, past the wood (2026-10-29/11-02, approved state below) · `tools/bake-angel.mjs` bakes the provisional
+  angel once into `assets/models/angel.bin` (`node --max-old-space-size=6000 tools/bake-angel.mjs 0.0065`; pool.js fetches it after the build).
 - **The house is raised (2026-10-20)**: `LIFT` 0.75 over the yard, a porch `PORCH` 1.85 deep along the kitchen's back wall
   (to `PORCH_X1`, where the bedroom's wall begins; the cellar doors on the house's wall east of it, the hose's tap and
   coil on the wall right of the back door, over the porch) (house.js).
@@ -173,11 +177,32 @@ Long history and the reasons behind decisions: `notes/history.md` (big — read 
   mother.js sets her pose by hand each frame instead. Mum's shader uses 15 of the 16 textures a fragment shader may
   read (the house's 8 shadow maps, the area lights' 2 tables, the ripple map, env, her colour and roughness, the eyes'
   picture — 2026-10-28): one more shadowed light in the house scene and she stops drawing; merge or drop a map first.
+- A mesh from surface nets or any generated field: check the triangles' winding against the normals (a preview that doesn't cull won't show it; in the game you see its inside: "the face has gone"). `Math.hypot` is several times slower than sqrt in a hot field. Custom samplers on sRGB textures return linear: no `pow` again.
 - Under the floor (the basement, `basement.js`, 2026-10-22): Luna's `Nav` (cat.js) skips colliders with top ≤ 0.03 —
   it ignored heights, and the basement's walls under the bedroom shut her in; whatever the house scene has below the
   floor shows *inside* the basement whenever the house pass is drawn from down there (`cellar.passes`), so it keeps out
   of `UNDER` (the foundation pieces in house.js). basement.js burns 2711 draws of its shared RNG where the wooden doors
   were: anything new before the steps draws from its own RNG, or everything in the basement moves.
+
+## The end of the garden (`js/pool.js`; he laid it out with a sketch, 2026-11-01/02)
+
+- **Shape**: the yard is an L now. `PLAN.yard`: `z0` −22.2, `step` −14 (where the old far fence stood), `x2` 9.3: past `step` it widens east to `x2`,
+  the fence turning out along `step`. In yard.js `Y` is still the old yard to `END` (−14: its lawn, grass, leaves, grove, all untouched, same dice)
+  and `YF` the whole of it. Where `notes/world.md` says the yard ends at −14, that is this `END`. `DZ` = `YF.z0 + 7.2 − 3` (neighbours further off, room for
+  trees behind the fence). The fence's old boards keep their dice; new lengths have their own, after them. Sky bigger (dome 36, tree line 33, centred z −8),
+  camera far 62, the neighbours' grass out to ±70 (short of the tree line the sky showed under the fence). The sun's shadow box is bigger: shadows ~25% less sharp than before.
+- **The house's power line** runs exactly where it did (the grove grew round it: the grove gets `wire`, the old points) but starts from a pole just outside the step,
+  fed from a pole further east and the alley. Anything new keeps off `lines` (`wire` + `wire.span`). `toLine` gives NaN on a repeated point: every leaf went.
+- **Pool**: long side across the yard, 8.2 × 4.2 m inside, west end a full half-round ("it was perfect like that"), east end square. Worked out in its own frame, turned a quarter
+  (`POOL.at`, `toYard`, `sdPool`/`sdLocal`). Water opaque, level −0.55. Colliders stop you on the coping (walked at from 72 directions: ≥ 11 cm off the water).
+  In it `DROWNED`: a flamingo's head and a bit of neck, tilted, mouldy, the eye on the house's side gone (`drownedFlamingo`, yard.js).
+- **Paving**: rows of setts (`settGeo`, instanced), up against the coping (cut narrower or shorter, never a row left off); some gone, 7.5% broken, each its own (`brokenStones`).
+  Puddles are see-through (`puddleTex`), not black. Fading out of the leaves `paved`/`litter`. Leaves are never mirrored in instancing: lit from the wrong side they go black.
+- **Table and chairs**: `TABLE` (−3.5, −16.86), nine rows of paving nearer the house than first; a chair each side and one on the house's side, knocked over (his sketch); iron bars only, no seat boards.
+- **Bushes** all along the fence (`hedge`, walked with its own dice): tall, thick, gaps; nothing hanging in the air: long shoots have stems. **Trees** outside the fence (`outsideTrees`, grove.js), boughs sagging in over it.
+- **Angel**: PROVISIONAL, he will generate a model and send it (his reference is his frontal photograph of a weathered stone angel, not in the project). At the pool's east end, facing it (`ANGEL`, `marbleAngel`).
+  Sculpting a likeness in code didn't satisfy him; a relief built straight from his photo was faithful from the front but broke up from the side, and he had it reverted. Replacing it: swap `marbleAngel`'s geometry; flag the model's licence (rule 2).
+- **AC fan** (house.js `fanJam`): only its speed is ever set. Every 4–34 s (`Math.random`) one of three jams; it always struggles first, catches sharply, breaks free sharply. "Take the hose" only on the coil (`loopBox`; the wide `zone` only for hanging it back: layers).
 
 ## The yard, the wood, the house outside, recent indoor work → `notes/world.md`
 
@@ -226,6 +251,7 @@ Rules from there that hold for any new work:
   (2026-10-19, the kitchen calendar: a postcard credited "Photo by Frank Ogsbury") and `assets/hell-writing.jpg`
   (2026-10-22, the corridor's UV writing: a stock-looking photo) (see rule 2); and `assets/models/mother.glb`
   (2026-10-23, Mum in the kitchen, `js/mother.js`: a Meshy AI model he sent — its terms depend on the plan it was made on).
+- The angel at the pool: his model to come. Not checked yet: Luna in the end of the garden; fps there on his M2; the drowned flamingo's empty eye in a close-up.
 - Not seen in an image yet: the flamingos' eyes in direct sun (only checked in shade).
 - Mum's right fist remade 2026-10-25/27 (notes/history.md): not yet judged by him — above all the wrist, cocked
   ~45° towards the little finger while she cuts (more than before), up to ~60° for a moment as she puts the knife down.

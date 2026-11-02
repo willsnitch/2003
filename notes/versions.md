@@ -151,3 +151,12 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   above the tap: dirty cream air conditioner on brackets, a real opening with the inside in shadow, crusted white
   grille, dirt crusted around and at the foot, a fan that turns slowly and now and then stops and jerks back into motion.
   Luna: eyes no longer lit in the dark with the blinds closed.
+
+## 0.5.6 — the end of the garden (2026-10-29 / 11-02)
+- Past the wood the garden widens to the right. A long abandoned pool (8.2 × 4.2 m, one end a half-round) with stagnant green water, duckweed,
+  floating leaves, worn coping, tiles coming off; a drowned flamingo's head in the water, one eye gone.
+- Old stone paving fading out of the leaf floor, moss and grass in the joints, up against the coping; some stones gone, each broken one cracked its
+  own way; puddles you can see into.
+- Iron table and three chairs in the weeds, one knocked over, their seat boards gone; tall irregular bushes all along the fence; thick trees outside
+  it, boughs hanging in, grey moss on some; a provisional stone angel at the pool's end (a model of his to replace it).
+- The air conditioner's fan jams at random in three ways: it struggles, catches, breaks free. "Take the hose" only when pointing at the hose.

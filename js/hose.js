@@ -220,6 +220,16 @@ export function gardenHose(g, ctx, { tapAt, wallZ, yard, ground = () => 0, extra
   ctx.interact.push(coil);
   nozzle.userData.interact = { label: () => (state === 'held' ? '' : 'Take the hose'), use: () => { if (state !== 'held') take(); } };
   ctx.interact.push(nozzle);
+  // while it hangs, it takes pointing at the hose itself (user, 2026-11-02: the wall's whole zone said "Take the hose"): the zone is
+  // only for hanging it back; a box just round the loops, as they are thin to aim at (three's rays pass over another layer)
+  const loops = new THREE.Box3();
+  for (let k = 0; k <= (LOOPS + 0.5) * 28; k++) loops.expandByPoint(loopAt(k / 28));
+  loops.expandByScalar(0.018);
+  const loopBox = new THREE.Mesh(new THREE.BoxGeometry(...loops.getSize(new THREE.Vector3()).toArray()), new THREE.MeshBasicMaterial({ visible: false }));
+  loops.getCenter(loopBox.position);
+  g.add(loopBox);
+  loopBox.userData.interact = coil.userData.interact;
+  ctx.interact.push(loopBox);
 
   const handAt = () => {
     const cam = ctx.camera;
@@ -401,6 +411,8 @@ export function gardenHose(g, ctx, { tapAt, wallZ, yard, ground = () => 0, extra
 
   return {
     update(dt, time) {
+      zone.layers.set(state === 'hung' ? 1 : 0);
+      loopBox.layers.set(state === 'hung' ? 0 : 1);
       const pl = ctx.player;
       run.set(state === 'held' ? 1 : 0);
       for (const wv of wets) { // the wet patches drying

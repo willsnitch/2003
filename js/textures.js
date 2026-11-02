@@ -6996,7 +6996,7 @@ export function hangingMossTex() {
  * drawn as the yard's ground draws them, so the two meet without a line).
  */
 export function pavingGroundTex(plan, litter, moss) {
-  const W = 2048, Hh = Math.round(2048 * (plan.z1 - plan.z0) / (plan.x1 - plan.x0));
+  const PX = 2048 / 9.2, W = Math.round((plan.x1 - plan.x0) * PX), Hh = Math.round((plan.z1 - plan.z0) * PX), WK = W / 2048; // (as fine as the yard's own)
   return canvasTex(W, Hh, (g, w, h) => {
     const r = mulberry32(5111);
     const at = (x, y) => [plan.x0 + (x / w) * (plan.x1 - plan.x0), plan.z0 + (y / h) * (plan.z1 - plan.z0)];
@@ -7010,7 +7010,7 @@ export function pavingGroundTex(plan, litter, moss) {
     }
     speckle(g, w, h, 30000, '#2a2216', 1.6, 5112);
     speckle(g, w, h, 16000, '#6f6a3e', 1.2, 5113);
-    for (let i = 0, n = Math.round(60000 * (h / 3090)); i < n; i++) { // moss in little cushions, brighter green where it catches the damp
+    for (let i = 0, n = Math.round(60000 * WK * (h / 3090)); i < n; i++) { // moss in little cushions, brighter green where it catches the damp
       const x = r() * w, y = r() * h, m = moss(...at(x, y));
       if (r() > m) continue;
       g.fillStyle = `rgba(${Math.round(78 + r() * 40)},${Math.round(98 + r() * 36)},${Math.round(36 + r() * 16)},${0.35 + r() * 0.4})`;
@@ -7023,7 +7023,7 @@ export function pavingGroundTex(plan, litter, moss) {
       g.fillRect(x, y, cell, cell);
     }
     const dead = ['#6f5133', '#80603a', '#9a7640', '#5a3f26', '#43301f', '#8a5434', '#a08a5a', '#7b6a3c', '#b09040'];
-    for (let i = 0, n = Math.round(320000 * (h / 3090)); i < n; i++) {
+    for (let i = 0, n = Math.round(320000 * WK * (h / 3090)); i < n; i++) {
       const x = r() * w, y = r() * h, k = Math.max(litter(...at(x, y)), 0.06);
       if (r() > k * 1.15) continue;
       const len = 5 + r() * 9, wide = len * (0.3 + r() * 0.3), a = r() * Math.PI * 2, wet = moss(...at(x, y)) > 0.5 && r() < 0.6;
@@ -7034,7 +7034,7 @@ export function pavingGroundTex(plan, litter, moss) {
       g.strokeStyle = 'rgba(40,26,14,0.5)'; g.lineWidth = 0.6; g.beginPath(); g.moveTo(-len / 2, 0); g.lineTo(len / 2, 0); g.stroke();
       g.restore();
     }
-    for (let i = 0, n = Math.round(9000 * (h / 3090)); i < n; i++) { // twigs
+    for (let i = 0, n = Math.round(9000 * WK * (h / 3090)); i < n; i++) { // twigs
       const x = r() * w, y = r() * h, k = Math.max(litter(...at(x, y)), 0.1);
       if (r() > k) continue;
       let a = r() * Math.PI * 2, px = x, py = y;
@@ -7256,7 +7256,7 @@ export function shrubSprayTex(seed = 1, bloom = 0) {
       if (depth < 1) for (let k = 0; k < 5; k++) { const p = pts[1 + k]; twig(p[0], p[1], a + (k % 2 ? 1 : -1) * (0.5 + r() * 0.6), len * (0.55 - k * 0.07), depth + 1); }
     };
     twig(w * 0.5, h * 0.92, (r() - 0.5) * 0.4, h * 0.78, 0);
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < 460; i++) {
       const pts = twigs[Math.floor(r() * twigs.length)], p = pts[1 + Math.floor(r() * (pts.length - 1))];
       const Lf = (22 + r() * 18) * (1 - 0.25 * (p[1] < h * 0.3 ? 1 : 0)), turn = (r() - 0.5) * 3.2, edge = 0.3 + r() * 0.7, v = r(), yellow = r() < 0.06, eaten = r() < 0.1;
       g.save(); g.translate(p[0] + (r() - 0.5) * 8, p[1] + (r() - 0.5) * 8); g.rotate(turn); g.scale(edge, 1);
@@ -7321,4 +7321,79 @@ export function weedTex(kind = 0, seed = 1) {
       if (r() < 0.12) { const [x, y] = at(1); g.fillStyle = 'rgba(176,168,140,0.7)'; for (let k = 0; k < 12; k++) { g.beginPath(); g.arc(x + (r() - 0.5) * 9, y + (r() - 0.5) * 9, 0.6 + r() * 0.6, 0, Math.PI * 2); g.fill(); } } // gone to seed
     }
   }));
+}
+
+/** The angel's stone (a tile 0.5 m square, laid on three ways): near white, sugary, pitted all over by the weather. */
+export function marbleTex() {
+  const L = lattice(5251);
+  return canvasTex(512, 512, (g, w, h) => {
+    perPixel(g, w, h, (u, v) => {
+      const a = pfbm(L, u, v, 3, 3, 4), vein = Math.pow(1 - Math.abs(2 * pfbm(L, u + a * 0.25, v + a * 0.2, 4, 4, 4) - 1), 14), grain = pnoise(L, u * 180, v * 180, 180, 180), g2 = pnoise(L, u * 70, v * 70, 70, 70);
+      const k = 240 + (a - 0.5) * 16 + (grain - 0.5) * 18 - vein * 14 - Math.max(0, g2 - 0.72) * 170;
+      return [k, k - 1, k - 5];
+    });
+    speckle(g, w, h, 9000, '#4b473e', 1.3, 5252);
+  }, { repeat: [1, 1] });
+}
+
+/**
+ * Rain standing on the paving (a picture over one puddle, its own `seed`, no two alike): murky, clear at its ragged edge so
+ * the stones and the moss show through the shallows, darker where it is deeper, silt and bits of green and seed on it.
+ */
+export function puddleTex(seed) {
+  const L = lattice(5271 + seed), r = mulberry32(5281 + seed);
+  return canvasTex(256, 256, (g, w, h) => {
+    const img = g.createImageData(w, h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const u = x / w, v = y / h, d = Math.hypot(u - 0.5, v - 0.5) * 2.3, n = pfbm(L, u, v, 5, 5, 4), silt = pfbm(L, u + 0.4, v + 0.7, 14, 14, 3);
+      const a = 1 - THREE.MathUtils.smoothstep(d + (n - 0.5) * 0.65, 0.62, 0.92), k = (y * w + x) * 4;
+      img.data[k] = 36 + silt * 34; img.data[k + 1] = 38 + silt * 32; img.data[k + 2] = 22 + silt * 18;
+      img.data[k + 3] = a * (118 + 80 * THREE.MathUtils.smoothstep(a, 0.4, 1) + (silt - 0.5) * 60);
+    }
+    g.putImageData(img, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 700; i++) { const x = r() * w, y = r() * h, c = r(); g.fillStyle = c < 0.55 ? `rgba(${70 + r() * 40},${92 + r() * 40},${30 + r() * 16},${0.35 + r() * 0.5})` : `rgba(${60 + r() * 40},${46 + r() * 26},${26 + r() * 14},${0.3 + r() * 0.5})`; g.beginPath(); g.ellipse(x, y, 0.5 + r() * 1.2, 0.4 + r() * 0.8, r() * 3, 0, Math.PI * 2); g.fill(); }
+    g.globalCompositeOperation = 'source-over';
+  });
+}
+
+/**
+ * The drowned flamingo's paint (`flamingoTex`, side on): years under and half out of stagnant water. Bleached, grey-green
+ * mould in blotches, thick low down and round its slime line, black specks of it spreading higher, the beak's black gone
+ * grey (`F`: its box and where its parts are).
+ */
+export function mouldyFlamingoTex(seed, F) {
+  const t = flamingoTex(seed, F), g = t.image.getContext('2d'), w = t.image.width, h = t.image.height, r = mulberry32(seed + 5);
+  const [x0, x1, y0, y1] = F.box, px = (x) => ((x - x0) / (x1 - x0)) * w, py = (y) => (1 - (y - y0) / (y1 - y0)) * h;
+  g.fillStyle = 'rgba(214,170,170,0.14)'; g.fillRect(0, 0, w, h); // faded, still pink
+  const X0 = px(0.15), X1 = px(0.35), Yw = py(0.782), Ytop = py(0.99);
+  for (let i = 0; i < 260; i++) { // blotches: low down thick, thinning upwards
+    const up = r() ** 1.7, x = X0 + r() * (X1 - X0), y = Yw + (Ytop - Yw) * up + (r() - 0.5) * h * 0.02, rad = (2 + r() ** 2 * 11) * (w / 512) * (1.2 - up * 0.7), c = r();
+    g.fillStyle = c < 0.45 ? `rgba(${58 + r() * 26},${72 + r() * 26},${38 + r() * 14},${0.3 + r() * 0.4})` : c < 0.8 ? `rgba(26,30,20,${0.28 + r() * 0.4})` : `rgba(84,66,40,${0.25 + r() * 0.3})`;
+    g.beginPath(); for (let k = 0; k <= 10; k++) { const a = (k / 10) * 6.283, q = rad * (0.6 + r() * 0.6); k ? g.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q * 0.8) : g.moveTo(x + q, y); } g.fill();
+  }
+  speckle(g, w, h, 2200, '#14160e', 1.5, seed + 6);
+  g.fillStyle = 'rgba(40,52,24,0.75)'; g.fillRect(0, py(0.804), w, py(0.768) - py(0.804)); // the slime line
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * The inside of an overgrown bush, seen between its outer sprays (no cut-outs: a tile 1 m square, repeating): leaf over
+ * leaf, darker the deeper, twigs among them, nothing bare showing.
+ */
+export function foliageMassTex() {
+  return canvasTex(512, 512, (g, w, h) => {
+    const r = mulberry32(5261);
+    g.fillStyle = '#10180c'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2600; i++) {
+      const x = r() * w, y = r() * h, L = 14 + r() * 16, a = r() * 6.3, deep = i / 2600, v = r(), e = 0.4 + r() * 0.6;
+      wrapDraw(g, w, h, x, y, () => {
+        g.rotate(a); g.scale(e, 1);
+        g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(L * 0.42, -L * 0.45, 0, -L); g.quadraticCurveTo(-L * 0.42, -L * 0.45, 0, 0);
+        g.fillStyle = `rgb(${Math.round((30 + v * 26) + deep * 30)},${Math.round((46 + v * 32) + deep * 44)},${Math.round((22 + v * 14) + deep * 16)})`;
+        g.fill();
+      });
+    }
+  }, { repeat: [1, 1] });
 }

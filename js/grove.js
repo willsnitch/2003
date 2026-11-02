@@ -357,7 +357,8 @@ export function leafCards(spots, map, tint, hang, r, place = null, { lift = 1.3,
     m.compose(p, q, s.set(size * (place ? 1 : r() < 0.5 ? -1 : 1) * (lenX ?? 1), size * (lenY ?? (lenX ? 0.5 : 1)), size)); // (mirrored now and then: not a frond, whose branch starts at one end)
     mesh.setMatrixAt(i, m);
     // out of the crown's middle, a little up: the sunny side bright, the far side and the inside dim
-    n.set(x - mid.x, (y - mid.y) * lift, z - mid.z).normalize().multiplyScalar(0.8).add(new THREE.Vector3(0, 0.35, 0)).normalize();
+    const own = spots[i].mid ?? mid; // (a spot may name its own: one bush of a hedge)
+    n.set(x - own.x, (y - own.y) * lift, z - own.z).normalize().multiplyScalar(0.8).add(new THREE.Vector3(0, 0.35, 0)).normalize();
     n.applyQuaternion(q.clone().invert());
     bend.set([n.x, n.y, n.z], i * 3);
     mesh.setColorAt(i, c.setHSL(tint[0] + (r() - 0.5) * 0.04, tint[1] + (r() - 0.5) * 0.15, tint[2] + (r() - 0.5) * 0.16)); // (a tint over the spray's own greens)
@@ -731,75 +732,72 @@ function fillRings(rings) {
 }
 
 /**
- * The two trees in the far corners, past the pool (user, 2026-10-29: "after the pool and before the fence two trees,
- * one in one corner, one in the other"): an old oak in the west corner, behind the angel, and a maple in the east —
- * grown as the grove's are, but apart from it (the grove's trees are as they were: none of this draws from their
- * dice), and hung with grey moss in long beards from their limbs, as in his photograph: nobody has been out here
- * for years, and it is damp. `yard`: the whole yard, to its far fence now; `wire`: every line overhead.
+ * Thick trees just outside the fence, past the pool (user, 2026-11-01), grown as the grove's are but apart from it (none of
+ * this draws from its dice): some of their crowns come down over the fence into the garden — boughs reaching in and sagging
+ * under their own leaves — and a few, nearest the angel, are hung with grey moss in long beards, as in his photographs.
+ * `yard`: the whole yard (x0, x1, x2, z0, step); `wire`: every line overhead.
  */
-export const CORNERS = {
-  west: { kind: 'oak', at: [-4.3, -26.55], reach: 4.0, foot: 0.62, seed: 1931, floor: 1.85 }, // (its limbs from higher up than the old oak's: they crowded the angel)
-  east: { kind: 'maple', at: [2.95, -26.6], reach: 3.3, foot: 0.47, seed: 1947 },
-};
-export function cornerTrees(g, ctx, { yard, wire, under = [] }) {
-  const trees = {}, beards = [];
-  const trunks = Object.entries(CORNERS).map(([k, v]) => ({ name: k, x: v.at[0], z: v.at[1], r: HABITS[v.kind].trunk.r * 1.3 }));
-  const insideYard = (p, d, len) => {
-    if (p.y > 2.1) return len;
-    const lim = (v, a, b) => (v > 1e-6 ? (b - a) / v : v < -1e-6 ? (a - b) / -v : Infinity);
-    const tx = d.x > 0 ? lim(d.x, p.x, yard.x1 - 0.2) : lim(-d.x, yard.x0 + 0.2, p.x);
-    const tz = d.z > 0 ? lim(d.z, p.z, yard.z1 - 0.2) : lim(-d.z, yard.z0 + 0.2, p.z);
-    return Math.min(len, Math.max(0, tx), Math.max(0, tz));
+export function outsideTrees(g, ctx, { yard, wire, under = [] }) {
+  const { x0, x2, z0, step } = yard, trees = {}, beards = [];
+  const LIST = {
+    a: { kind: 'oak', at: [-4.05, z0 - 1.0], reach: 3.9, seed: 1931, inward: [0.2, 1], boughs: 5, beard: false },
+    b: { kind: 'maple', at: [-0.5, z0 - 0.9], reach: 3.4, seed: 1947, inward: [-0.1, 1], boughs: 2, beard: false },
+    c: { kind: 'oak', at: [3.3, z0 - 1.0], reach: 3.6, seed: 2011, inward: [0, 1], boughs: 5, beard: false },
+    d: { kind: 'maple', at: [7.05, z0 - 0.95], reach: 3.4, seed: 2029, inward: [0.25, 1], boughs: 4, beard: true },
+    e: { kind: 'oak', at: [x2 + 1.0, z0 + 4.4], reach: 3.7, seed: 2053, inward: [-1, 0.1], boughs: 5, beard: true },
+    f: { kind: 'maple', at: [x0 - 0.95, z0 + 3.2], reach: 3.3, seed: 2069, inward: [1, -0.1], boughs: 4, beard: false },
   };
-  for (const [name, { kind, at: [x, z], reach, seed, floor }] of Object.entries(CORNERS)) {
-    const H = HABITS[kind], r = mulberry32(seed);
-    const blocked = (p) => p.y < (floor ?? H.floor ?? 1.95) || (p.y < 1.95 && (p.x < yard.x0 + 0.25 || p.x > yard.x1 - 0.25 || p.z < yard.z0 + 0.25)) || (wire && toLine(p, wire) < 1.05)
-      || trunks.some((t) => t.name !== name && Math.hypot(p.x - t.x, p.z - t.z) < t.r + 0.45) || Math.hypot(p.x - x, p.z - z) > reach * 1.25
+  const inGarden = (p) => p.x > x0 && p.x < x2 && p.z > z0 && p.z < step;
+  const atFence = (x, z, m) => (z < step + m && ((Math.abs(x - x0) < m || Math.abs(x - x2) < m) && z > z0 - m)) || (Math.abs(z - z0) < m && x > x0 - m && x < x2 + m);
+  const trunks = Object.entries(LIST).map(([k, v]) => ({ name: k, x: v.at[0], z: v.at[1], r: HABITS[v.kind].trunk.r * 1.2 }));
+  for (const [name, { kind, at: [x, z], reach, seed, inward, boughs, beard }] of Object.entries(LIST)) {
+    const H0 = HABITS[kind], r = mulberry32(seed);
+    const H = { ...H0, trunk: { ...H0.trunk, len: H0.trunk.len * 0.82, r: H0.trunk.r * 0.88 }, levels: H0.levels.map((l, i) => (i === 2 ? { ...l, kids: Math.max(3, l.kids - 2) } : l)) };
+    const blocked = (p) => p.y < (inGarden(p) ? 1.4 : 2.05) || (atFence(p.x, p.z, 0.3) && p.y < 2.1) || (wire && toLine(p, wire) < 1.05)
+      || trunks.some((t) => t.name !== name && Math.hypot(p.x - t.x, p.z - t.z) < t.r + 0.4) || Math.hypot(p.x - x, p.z - z) > reach * (p.y > 4.4 ? 1.05 : 1.5) // (the boughs reach in low; high up the crowns leave the sky over the pool)
       || under.some((b) => p.x > b.x0 - 0.2 && p.x < b.x1 + 0.2 && p.z > b.z0 - 0.2 && p.z < b.z1 + 0.2 && p.y < b.top + 0.5);
-    const G = { H, r, limbs: [], ends: [], room: (p, d, len) => insideYard(p, d, len), blocked };
-    const lean = new THREE.Vector3(Math.sin(r() * 6.3), 0, Math.cos(r() * 6.3)).multiplyScalar(H.trunk.lean);
-    grow(G, new THREE.Vector3(x, -0.05, z), UP.clone().add(lean).normalize(), H.trunk.len * 0.92, H.trunk.r * 0.95, 0, H.trunk);
+    const G = { H, r, limbs: [], ends: [], room: (p, d, len) => len, blocked };
+    const lean = new THREE.Vector3(inward[0], 0, inward[1]).normalize().multiplyScalar(0.07);
+    grow(G, new THREE.Vector3(x, -0.05, z), UP.clone().add(lean).normalize(), H.trunk.len, H.trunk.r, 0, H.trunk);
+    // the boughs coming in over the fence, sagging
+    const trunk = G.limbs[0], side = new THREE.Vector3(-inward[1], 0, inward[0]).normalize();
+    for (let b = 0; b < boughs; b++) {
+      const t = 0.5 + r() * 0.34, [at] = along(trunk.pts, t), d = new THREE.Vector3(inward[0], 0.32 + r() * 0.2, inward[1]).normalize().addScaledVector(side, (b / Math.max(1, boughs - 1) - 0.5) * 1.5 + (r() - 0.5) * 0.25).normalize();
+      grow(G, at, d, reach * (0.85 + r() * 0.4), 0.07 + r() * 0.035, 1, { seg: 0.3, rise: 0, droop: 0.3 + r() * 0.16, wob: 0.17, kink: 0.14, tip: 0.3 }, { limb: trunk, t });
+    }
     const out = { pos: [], nor: [], uv: [], col: [], idx: [], mix: [], wound: [], profile: [] }, r2 = mulberry32(seed + 77), ph = r2() * 6.3;
-    const dark = (p) => 0.7 + 0.3 * THREE.MathUtils.smoothstep(p.y, 0.0, 0.9); // (darker and damper low down than the grove's)
-    for (const { pts, rad, level } of G.limbs) tube(out, pts, rad, level === 0 ? 16 : level === 1 ? 10 : level === 2 ? 6 : 4, dark, { kind, foot: level === 0 ? { kind, y0: 0, ph } : null, collar: level > 0 });
-    const buried = roots(out, kind, x, z, H.trunk.r, ph, r2, dark);
-    const showing = surfaceRoots(out, kind, x, z, H.trunk.r, 2, mulberry32(seed + 5), dark, (p, rad) =>
-      p.x > yard.x0 + 0.3 && p.x < yard.x1 - 0.3 && p.z > yard.z0 + 0.3 && under.every((b) => p.x < b.x0 - 0.15 - rad || p.x > b.x1 + 0.15 + rad || p.z < b.z0 - 0.15 - rad || p.z > b.z1 + 0.15 + rad));
+    const dark = (p) => 0.7 + 0.3 * THREE.MathUtils.smoothstep(p.y, 0.0, 0.9);
+    for (const { pts, rad, level } of G.limbs) tube(out, pts, rad, level === 0 ? 14 : level === 1 ? 8 : level === 2 ? 5 : 4, dark, { kind, foot: level === 0 ? { kind, y0: 0, ph } : null, collar: level > 0 });
+    roots(out, kind, x, z, H.trunk.r, ph, r2, dark);
     g.add(meshOf(out, barkMat(kind)));
-    const L = H.leaves, byFence = (lx, lz, m) => Math.min(Math.abs(lx - yard.x0), Math.abs(lx - yard.x1), Math.abs(lz - yard.z0)) < m;
-    const spots = leafSpots(G, L).filter(([lx, ly, lz, s]) => ly - s * 0.5 > L.minY - 0.6 && ly > L.minY && !(byFence(lx, lz, s * 0.55) && ly - s * 0.5 < 1.95) && (!wire || toLine(new THREE.Vector3(lx, ly, lz), wire) > s * 0.6 + 0.3)
-      && !under.some((b) => lx > b.x0 - s * 0.5 && lx < b.x1 + s * 0.5 && lz > b.z0 - s * 0.5 && lz < b.z1 + s * 0.5 && ly - s * 0.5 < b.top + 0.1));
-    g.add(leafCards(spots, T.leafSprayTex(kind, 3), L.tint.map((v, i) => v * [1, 0.92, 0.94][i]), L.hang, r, null, L.near ? { near: L.near } : {}));
+    // leaves all over, thick; those on the far side, that nobody sees from the garden, mostly left off
+    const L = { ...H.leaves, every: H.leaves.every * 0.92, hang: true }, rl = mulberry32(seed + 3);
+    const away = (lx, lz) => -((lx - x) * inward[0] + (lz - z) * inward[1]) / Math.hypot(inward[0], inward[1]);
+    const spots = leafSpots(G, L).filter(([lx, ly, lz, s]) => ly - s * 0.5 > 0.95 && !(atFence(lx, lz, s * 0.55) && ly - s * 0.5 < 1.95) && (!wire || toLine(new THREE.Vector3(lx, ly, lz), wire) > s * 0.6 + 0.3)
+      && !under.some((b) => lx > b.x0 - s * 0.5 && lx < b.x1 + s * 0.5 && lz > b.z0 - s * 0.5 && lz < b.z1 + s * 0.5 && ly - s * 0.5 < b.top + 0.1) && (away(lx, lz) < 1.2 || rl() < 0.3));
+    g.add(leafCards(spots, T.leafSprayTex(kind, 3), L.tint.map((v, i) => v * [1, 0.95, 0.92][i]), true, r, null, { near: [0.25, 0.75] }));
     ctx.colliders.push({ type: 'seg', ax: x, az: z, bx: x + 0.001, bz: z, r: H.trunk.r * 1.2 + 0.04, hose: false });
-    for (const { pts, rad, level } of G.limbs) {
-      if (!level) continue;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const a = pts[i], b = pts[i + 1], low = Math.min(a.y, b.y) - rad[i];
-        if (low > 1.5) continue;
-        ctx.colliders.push({ type: 'seg', ax: a.x, az: a.z, bx: b.x, bz: b.z, r: rad[i] + 0.04, base: low, top: Math.max(a.y, b.y) + rad[i] });
-      }
-    }
-    // the moss hanging off it in beards, from the undersides of its limbs and branches, a hand or two apart where
-    // it has taken, none where it hasn't: long grey-green strands, straight down (there is no wind), thinning to wisps
-    const rm = mulberry32(seed + 11);
-    for (const { pts, rad, level } of G.limbs) {
-      if (level < 1 || level > 2) continue;
-      let run = rm() * 0.4;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const seg = pts[i].distanceTo(pts[i + 1]);
-        for (; run < seg; run += 0.22 + rm() * 0.5) {
-          const p = pts[i].clone().lerp(pts[i + 1], run / seg), rr = rad[i];
-          if (p.y < 2.2 || p.y > 9 || rm() > 0.85 * (fbm2(p.x * 0.8 + seed, p.z * 0.8) > 0.4 ? 1 : 0.35)) continue;
-          const len = 0.6 + rm() ** 1.4 * 1.7, wide = 0.24 + rm() * 0.22, top = p.y - rr * 0.6;
-          if (top - len < 1.25 || under.some((b) => p.x > b.x0 - 0.2 && p.x < b.x1 + 0.2 && p.z > b.z0 - 0.2 && p.z < b.z1 + 0.2 && top - len < b.top + 0.2)) continue;
-          if (wire && toLine(p, wire) < 1.0) continue;
-          const yaw = rm() * Math.PI;
-          for (const turn of [0, Math.PI / 2 + (rm() - 0.5) * 0.6]) beards.push([p.x + (rm() - 0.5) * 0.05, top - len / 2, p.z + (rm() - 0.5) * 0.05, len, yaw + turn, wide / len]);
+    if (beard) { // the moss in beards, off the undersides of its limbs and branches, straight down: there is no wind
+      const rm = mulberry32(seed + 11);
+      for (const { pts, rad, level } of G.limbs) {
+        if (level < 1 || level > 2) continue;
+        let run = rm() * 0.4;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const seg = pts[i].distanceTo(pts[i + 1]);
+          for (; run < seg; run += 0.22 + rm() * 0.5) {
+            const p = pts[i].clone().lerp(pts[i + 1], run / seg);
+            if (p.y < 2.2 || p.y > 9 || rm() > 0.85 * (fbm2(p.x * 0.8 + seed, p.z * 0.8) > 0.4 ? 1 : 0.35)) continue;
+            const len = 0.6 + rm() ** 1.4 * 1.7, wide = 0.24 + rm() * 0.22, top = p.y - rad[i] * 0.6;
+            if (top - len < 1.25 || (atFence(p.x, p.z, wide) && top - len < 1.95) || under.some((b) => p.x > b.x0 - 0.2 && p.x < b.x1 + 0.2 && p.z > b.z0 - 0.2 && p.z < b.z1 + 0.2 && top - len < b.top + 0.2)) continue;
+            if (wire && toLine(p, wire) < 1.0) continue;
+            const yaw = rm() * Math.PI;
+            for (const turn of [0, Math.PI / 2 + (rm() - 0.5) * 0.6]) beards.push([p.x + (rm() - 0.5) * 0.05, top - len / 2, p.z + (rm() - 0.5) * 0.05, len, yaw + turn, wide / len]);
+          }
+          run -= seg;
         }
-        run -= seg;
       }
     }
-    trees[name] = { kind, limbs: G.limbs, leaves: spots, roots: [...buried, ...showing], trunk: { x, z, rings: fillRings(out.profile) } };
+    trees[name] = { kind, limbs: G.limbs, leaves: spots };
   }
   if (beards.length) {
     const rb = mulberry32(1963), q = new THREE.Quaternion(), e = new THREE.Euler();
