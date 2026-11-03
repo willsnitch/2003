@@ -166,6 +166,43 @@ export function layeredShadow(renderer, scene, light, movers) {
 }
 
 /**
+ * `mesh` (indexed) cut into pieces `size` m square across x and z, each triangle going to the piece its middle is in:
+ * the same triangles, sharing the same buffers, but what is out of view is now left out, where before one corner in
+ * view drew the whole of it (the porch's boards: 1.2 million triangles in three meshes, all drawn from the bedroom for
+ * the bit of railing in the window). Returns the pieces, to add in its place.
+ */
+export function inPieces(mesh, size) {
+  const geo = mesh.geometry, P = geo.attributes.position, I = geo.index.array, cells = new Map();
+  for (let t = 0; t < I.length; t += 3) {
+    const x = (P.getX(I[t]) + P.getX(I[t + 1]) + P.getX(I[t + 2])) / 3, z = (P.getZ(I[t]) + P.getZ(I[t + 1]) + P.getZ(I[t + 2])) / 3;
+    const key = (Math.floor(x / size) + 4096) * 8192 + Math.floor(z / size) + 4096;
+    let list = cells.get(key);
+    if (!list) cells.set(key, (list = []));
+    list.push(I[t], I[t + 1], I[t + 2]);
+  }
+  const v = new THREE.Vector3();
+  return [...cells.values()].map((list) => {
+    const part = new THREE.BufferGeometry();
+    for (const [name, attr] of Object.entries(geo.attributes)) part.setAttribute(name, attr);
+    part.setIndex(new THREE.BufferAttribute(P.count > 65535 ? new Uint32Array(list) : new Uint16Array(list), 1));
+    // (its bounds from its own corners: three's would take every vertex of the buffers it shares)
+    const box = (part.boundingBox = new THREE.Box3());
+    for (const i of list) box.expandByPoint(v.fromBufferAttribute(P, i));
+    const sphere = (part.boundingSphere = new THREE.Sphere(box.getCenter(new THREE.Vector3()), 0));
+    for (const i of list) sphere.radius = Math.max(sphere.radius, sphere.center.distanceToSquared(v.fromBufferAttribute(P, i)));
+    sphere.radius = Math.sqrt(sphere.radius);
+    const piece = new THREE.Mesh(part, mesh.material);
+    piece.position.copy(mesh.position);
+    piece.quaternion.copy(mesh.quaternion);
+    piece.scale.copy(mesh.scale);
+    piece.castShadow = mesh.castShadow;
+    piece.receiveShadow = mesh.receiveShadow;
+    piece.userData = { ...mesh.userData };
+    return piece;
+  });
+}
+
+/**
  * Everything under `root` that never moves, merged into one mesh per material (and per way it
  * takes shadow), so the house costs a few dozen draws instead of a thousand. Left alone: anything
  * that can be used or that moves (an `interact` or `live` on it or above it), instanced meshes,

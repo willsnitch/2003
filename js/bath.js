@@ -41,6 +41,9 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   // the ripples, over the whole bathroom (water.js RippleSim): what stirs the water pushes it (`disturb`)
   const sim = new RippleSim(room);
   Object.assign(WU, sim.uniforms);
+  // the floor's water its own reflection, drawn at its own height: till it is one with the bath's it had none, only the
+  // white room it reflects when there is none — a pale film on it up to the bath's top (user, 2026-11-03)
+  const floorMirror = new PlanarReflection(), floorU = Object.assign({}, WU, { uReflTex: { value: null }, uReflMat: { value: new THREE.Matrix4() } });
   let maskKey = '', maskIn = 0;
 
   // ---- the water in the bath: its surface, cut to the bath's shape at whatever height it has reached
@@ -288,7 +291,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       .replace('#include <common>', '#include <common>\nuniform float uSpread;\nuniform sampler2D uArrive;\nvarying vec2 vWet;')
       .replace('#include <alphatest_fragment>', 'float arrive = texture2D(uArrive, vWet).r;\nif (arrive > uSpread) discard;\ndiffuseColor.a *= smoothstep(uSpread, uSpread - 0.015, arrive);\n#include <alphatest_fragment>');
   };
-  waterSurface(puddleMat, WU, roomRefl);
+  waterSurface(puddleMat, floorU, roomRefl);
   const puddleGeo = new THREE.PlaneGeometry(fw, fd).rotateX(-Math.PI / 2);
   // u along x from x0, v along z from z0, to match the map above
   const pp = puddleGeo.attributes.position, pu = puddleGeo.attributes.uv;
@@ -348,7 +351,12 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   // the planes of its inside (`dry`) nothing is tinted. A material's `userData.waterSide`: 'dry' (the
   // boat's own inside: dry whenever the boat is), 'wet' (its outside, never dry).
   const DRY = 14;
-  const volumeU = { uWL: { value: -9 }, uWBox: { value: new THREE.Vector4(room.x0 - 0.08, room.z0 - 0.02, room.x1 + 0.08, room.z1 + 0.08) }, uTL: { value: -9 }, uTBox: { value: new THREE.Vector4() }, uWCam: { value: new THREE.Vector3() }, uDry: { value: Array.from({ length: DRY }, () => new THREE.Vector4(0, 1, 0, 1e4)) }, uDryOn: { value: 0 }, uDim: { value: 1 }, uVTime: { value: 0 }, uDBox: { value: new THREE.Vector4(room.x0 - 0.03, room.z0 - 0.03, room.x1 + 0.03, room.z1 + 0.03) },
+  // (the boxes run on into the walls as far as the ceiling does, 13.5 cm, short of their outer faces; and the point
+  // is taken on the surface itself, `centroid`: at its edges a wall or the ceiling seen side-on was worked out a
+  // little — or a long way — past its end, out of the box, and with the light off it lit up there at full strength:
+  // a line of light down both corners and along the top of the end wall, as you moved — user, 2026-11-03)
+  const IN = 0.137;
+  const volumeU = { uWL: { value: -9 }, uWBox: { value: new THREE.Vector4(room.x0 - IN, room.z0 - 0.02, room.x1 + IN, room.z1 + IN) }, uTL: { value: -9 }, uTBox: { value: new THREE.Vector4() }, uWCam: { value: new THREE.Vector3() }, uDry: { value: Array.from({ length: DRY }, () => new THREE.Vector4(0, 1, 0, 1e4)) }, uDryOn: { value: 0 }, uDim: { value: 1 }, uVTime: { value: 0 }, uDBox: { value: new THREE.Vector4(room.x0 - IN, room.z0 - IN, room.x1 + IN, room.z1 + IN) },
     // the ripples (the same as the water's, under other names: the water's own shader has those)
     uRipH: sim.uniforms.uSim, uRipBox: sim.uniforms.uSimBox, uRipTexel: sim.uniforms.uSimTexel, uRipOn: sim.uniforms.uSimOn };
   // The same patch dims the room with its light off (house.js, the switch by the door): in the box of
@@ -364,7 +372,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       before?.call(m, sh, r);
       Object.assign(sh.uniforms, volumeU);
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWaterW;')
+        .replace('#include <common>', '#include <common>\ncentroid varying vec3 vWaterW;')
         .replace('#include <project_vertex>', `#include <project_vertex>
           vec4 waterW = vec4(transformed, 1.0);
           #ifdef USE_INSTANCING
@@ -372,7 +380,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
           #endif
           vWaterW = (modelMatrix * waterW).xyz;`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${side}varying vec3 vWaterW;\nuniform float uWL, uTL, uDryOn, uDim, uVTime;\nuniform vec4 uWBox, uTBox, uDBox, uDry[${DRY}];\nuniform vec3 uWCam;\nuniform sampler2D uRipH;\nuniform vec4 uRipBox;\nuniform vec2 uRipTexel;\nuniform float uRipOn;\n${CAUSTICS}`)
+        .replace('#include <common>', `#include <common>\n${side}centroid varying vec3 vWaterW;\nuniform float uWL, uTL, uDryOn, uDim, uVTime;\nuniform vec4 uWBox, uTBox, uDBox, uDry[${DRY}];\nuniform vec3 uWCam;\nuniform sampler2D uRipH;\nuniform vec4 uRipBox;\nuniform vec2 uRipTexel;\nuniform float uRipOn;\n${CAUSTICS}`)
         // the window panels (house.js windowLight) can't cast shadows, and from the living room and the
         // kitchen their light went through the walls into the bathroom, which has no window: not in here
         .replace('#include <lights_fragment_begin>', 'bool inBathroom = vWaterW.x > uDBox.x && vWaterW.x < uDBox.z && vWaterW.z > uDBox.y && vWaterW.z < uDBox.w;\n' +
@@ -494,8 +502,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   const api = {
     /** How high the water may go: up to just under the top of the door. */
     top,
-    /** For tuning from the console: the water's uniforms, the reflection and which surface uses it. */
-    look: { WU, mirror, bathRefl, roomRefl, sim },
+    /** For tuning from the console: the water's uniforms, the reflections and which surface uses which. */
+    look: { WU, floorU, mirror, floorMirror, bathRefl, roomRefl, sim },
     /** Something stirs the water at x, z: ripples run out from there, `amp` strong (0.05 a touch, 0.6 a splash), `r` metres across. */
     disturb(x, z, amp = 0.3, r = 0.05) {
       sim.disturb(x, z, amp, r);
@@ -513,12 +521,14 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       bathRefl.value = roomRefl.value = 0;
       const eye = camera.position;
       if (!inRoom(eye.x, eye.z)) return;
-      if (whole && puddle.visible && eye.y < state.flood) { // under it: what is above, seen up through it
-        if (mirror.render(renderer, scene, camera, state.flood, WU, [surface, puddle, wall, sheet, band, ...hide], true)) roomRefl.value = 1;
-        return;
+      const skip = [surface, puddle, wall, sheet, band, ...hide];
+      if (puddle.visible) { // the floor's water (under it: what is above, seen up through it)
+        const under = whole && eye.y < state.flood;
+        if (floorMirror.render(renderer, scene, camera, puddle.position.y, floorU, skip, under)) roomRefl.value = 1;
+        if (under) return;
       }
-      const [y, which] = whole && puddle.visible ? [state.flood, roomRefl] : surface.visible ? [state.level, bathRefl] : puddle.visible ? [state.flood, roomRefl] : [];
-      if (which && mirror.render(renderer, scene, camera, y, WU, [surface, puddle, wall, sheet, band, ...hide])) which.value = 1;
+      // and the bath's, while it is a water of its own
+      if (surface.visible && mirror.render(renderer, scene, camera, state.level, WU, skip)) bathRefl.value = 1;
     },
     /** What stands up into the room's water, as boxes (set by house.js): the floating duck drifts round them. */
     blocks: () => [],

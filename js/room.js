@@ -92,7 +92,10 @@ export function buildShell(scene, M) {
   g.add(boxMM(W, W + t, 0, H, -t, D + t, M.wall));
   g.add(boxMM(0, win.x0, 0, H, -t, 0, M.wall));
   g.add(boxMM(win.x1, W, 0, H, -t, 0, M.wall));
-  g.add(boxMM(win.x0, win.x1, 0, win.y0, -t, 0, M.wall));
+  // (under the window: stepped down under the sill's back, which runs 2 cm into the reveal — level with it, the two
+  // tops lay in one plane and the sill flickered as you moved: user, 2026-11-03)
+  g.add(boxMM(win.x0, win.x1, 0, win.y0, -t, -0.02, M.wall));
+  g.add(boxMM(win.x0, win.x1, 0, win.y0 - 0.035, -0.02, 0, M.wall));
   g.add(boxMM(win.x0, win.x1, win.y1, H, -t, 0, M.wall));
   g.add(boxMM(0, door.x0, 0, H, D, D + t, M.wall));
   g.add(boxMM(door.x1, W, 0, H, D, D + t, M.wall));
@@ -146,11 +149,15 @@ export function buildWindow(scene, M) {
   g.add(boxMM(win.x0 - 0.075, win.x1 + 0.075, win.y0 - 0.11, win.y0 - 0.035, 0, 0.016, frameTrim));
   // sash: frame + meeting rail of a double-hung window, set back in the reveal
   const sz0 = -0.105, sz1 = -0.07, sw = 0.045;
-  g.add(boxMM(win.x0, win.x0 + sw, win.y0, win.y1, sz0, sz1, frameTrim));
-  g.add(boxMM(win.x1 - sw, win.x1, win.y0, win.y1, sz0, sz1, frameTrim));
-  g.add(boxMM(win.x0, win.x1, win.y1 - sw, win.y1, sz0, sz1, frameTrim));
-  g.add(boxMM(win.x0, win.x1, win.y0, win.y0 + sw, sz0, sz1, frameTrim));
-  g.add(boxMM(win.x0, win.x1, midY - 0.022, midY + 0.022, sz0, sz1, frameTrim));
+  const sash = [
+    [win.x0, win.x0 + sw, win.y0, win.y1, sz0, sz1],
+    [win.x1 - sw, win.x1, win.y0, win.y1, sz0, sz1],
+    [win.x0, win.x1, win.y1 - sw, win.y1, sz0, sz1],
+    [win.x0, win.x1, win.y0, win.y0 + sw, sz0, sz1],
+    [win.x0, win.x1, midY - 0.022, midY + 0.022, sz0, sz1],
+  ];
+  // (the rails between the stiles, not across them: their faces lay in one plane in the corners)
+  for (const [x0, x1, ...b] of sash) g.add(x1 - x0 > 0.1 ? boxMM(x0 + sw, x1 - sw, ...b, frameTrim) : boxMM(x0, x1, ...b, frameTrim));
   // the glass (user, 2026-10-15: "the window doesn't look like there's glass"): what gives glass away is
   // what is on it and what it gives back — dust, dried rain, a wipe, small fingers; a faint haze over
   // the yard; and the room seen in it, dimly, more at a slant. Two layers: the dirt, and the reflection
@@ -262,7 +269,7 @@ export function buildWindow(scene, M) {
     return true;
   };
 
-  return { group: blind, slats, state, apply, step, glass: [dirt, sheen] };
+  return { group: blind, slats, state, apply, step, glass: [dirt, sheen], sash };
 }
 
 export function buildDoor(scene, M, colliders) {

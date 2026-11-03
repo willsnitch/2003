@@ -168,3 +168,24 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   Bathroom tiles whole; the corridor ghost no longer breaks the wallpaper's seam. The angel at the pool's end is now
   his own model (a figure on a two-step plinth, 2.05 m to the wing tips), made light for the game (80 → 15 MB)
   with its feet, plinth and inscription exactly as in his model.
+
+## 0.5.8 — lighter, and a breeze (2026-11-03; number proposed)
+- Lighter with the same picture (checked pixel by pixel): 11–44 % more frames a second depending on where you are
+  (bedroom 35 → 47–50, bathroom 40 → 55, porch 31 → 45). The picture is smoothed and finished in one go; the kitchen
+  lamp's shadow redraws only Mum as she moves; the bedroom isn't drawn when it can't be seen, and from inside it
+  nothing is drawn that can't be seen through its window or door; the porch's boards are drawn only where in view.
+- A breeze now and then (every 20 s or so, a few seconds long, never on a beat; still in between): it moves the
+  leaves, the neighbours' crowns and the hanging moss, lightly and slowly; the weeping willow's shoots swing all the
+  time, gently; the light under the crowns moves on the lawn as the leaves do. Shadows stay still.
+
+## 0.5.9 — small fixes, bubbles in the pool, the kitchen socket (2026-11-03; number proposed)
+- 3 November (rounds 1–5): the bedroom sill no longer flickers; no line of sun on the window frame by the glass, nor
+  along the top of the west wall with the blinds shut; no lines of light coming and going at the far corners of the
+  corridor and the bathroom (shadows and room limits now taken on the surface itself). Luna follows you into the
+  bathroom within 3 s from anywhere in the house, so the door shuts and the level can start. The toaster turned out
+  from the wall; a worn wall socket between it and the microwave, both plugged in, their leads slack on the worktop.
+  Now and then small bubbles come up slowly in the pool: pale under the surface, a glossy bead on top for a moment,
+  a ring as it bursts. The leaves never quite still (a quarter of a breeze between breezes). The bathroom's light
+  spills out of its open door into the corridor. The fan starts again slowly, over half a second. Lighter in the
+  bathroom: with its door shut nothing behind its walls is drawn (the water's reflection had redrawn the whole house
+  and garden every frame: 8 million triangles a frame → 0.3–0.4).

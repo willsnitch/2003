@@ -20,6 +20,11 @@ import { bubbles } from './bubbles.js';
 import { buildZelpa } from './zelpa.js';
 import { deg } from './util.js';
 
+// Every shadow looked up on the surface itself (`centroid`): at the edge of a surface seen side-on — a wall at a corner,
+// the top of the corridor's rail — the picture's samples worked its point out past the end of it, out through the
+// wall, into the sun: a line of light down the far corners of the corridor and of the bathroom and along the rail,
+// coming and going as you moved (user, 2026-11-03). The more so the smaller the window.
+for (const k of ['shadowmap_pars_vertex', 'shadowmap_pars_fragment']) THREE.ShaderChunk[k] = THREE.ShaderChunk[k].replaceAll('varying vec4 v', 'centroid varying vec4 v');
 const params = new URLSearchParams(location.search);
 const SHOT = params.has('shot'); // clean frame for comparing against the reference photo
 
@@ -62,8 +67,25 @@ const shell = buildShell(scene, M);
   const { W, H, T: t, win } = ROOM, e = 0.01;
   const slab = ([x0, x1], [y0, y1]) => new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, t)).translateX((x0 + x1) / 2).translateY((y0 + y1) / 2).translateZ(-t / 2);
   scene.add(shadowOnly(shadowTwin([slab([-t, win.x0 - e], [0, H]), slab([win.x1 + e, W + t], [0, H]), slab([win.x0 - e, win.x1 + e], [0, win.y0 - e]), slab([win.x0 - e, win.x1 + e], [win.y1 + e, H])]), [lights.sun]));
+  // and a lid over the room, 30 cm thick: the sun's shadow of the ceiling alone, a plane, let a dashed line of it in
+  // along the top of the west wall, right under the ceiling, the blind shut (user, 2026-11-03)
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(W + 2 * t, 0.3, ROOM.D + 2 * t)).translateX(W / 2).translateY(H + 0.15).translateZ(ROOM.D / 2);
+  scene.add(shadowOnly(shadowTwin([lid]), [lights.sun]));
 }
 const blind = buildWindow(scene, M);
+{
+  // the sash too, from both sides, a hair inside its faces (so its own sunny faces keep their light): taken at its
+  // far faces, a thread of sun lay along its foot on the reveal, right by the glass (user, 2026-11-03)
+  const k = 0.0015, piece = ([x0, x1, y0, y1, z0, z1]) => new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 - 2 * k, y1 - y0 - 2 * k, z1 - z0 - 2 * k)).translateX((x0 + x1) / 2).translateY((y0 + y1) / 2).translateZ((z0 + z1) / 2);
+  // and a band round the glass, just outside the sash (the shadow a glazing bead would give): the low sun through the
+  // glass lit the sash's own faces round it, the ones that look into the opening, a thin bright line down one side of
+  // the glass and along its foot — "a line of light on the frame by the glass" (user, 2026-11-03). Its sides 4 cm,
+  // its rails 2 cm: wide enough for those faces right through to the room side at 15° of sun
+  const [west, east, top, bottom, meeting] = blind.sash, z0 = west[4] - 0.006, z1 = west[4] - 0.001, S = 0.04, R = 0.02;
+  const bands = [[west[1], west[1] + S, bottom[3], top[2]], [east[0] - S, east[0], bottom[3], top[2]], [west[1], east[0], bottom[3], bottom[3] + R], [west[1], east[0], top[2] - R, top[2]],
+    [west[1], east[0], meeting[3], meeting[3] + R], [west[1], east[0], meeting[2] - R, meeting[2]]].map(([x0, x1, y0, y1]) => [x0, x1, y0, y1, z0, z1]);
+  scene.add(shadowOnly(shadowTwin([...blind.sash, ...bands].map(piece)), [lights.sun]));
+}
 const door = buildDoor(scene, M, ctx.colliders);
 buildProps(scene, M, ctx);
 // the rest of the house and the yard: a scene of its own, with its own lamps (house.js)
@@ -225,7 +247,7 @@ const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(4, 4, 
 // Each scene has its own lamps and its own shadow maps, redrawn when its own things move.
 let roomShadowsDue = true;
 const roomPass = { scene, shadowsDue: () => roomShadowsDue, enabled: true };
-const housePass = { scene: house.scene, shadowsDue: () => house.shadowsDue(), enabled: true };
+const housePass = { scene: house.scene, shadowsDue: () => house.shadowsDue(), enabled: true, hide: () => hideUnseen() };
 // and under the house, the basement (basement.js): drawn only when it can be seen; from down there the house and the
 // bedroom only when the cellar's open doors are in view
 const cellarPass = { scene: house.cellar.scene, shadowsDue: () => house.cellar.shadowsDue(), enabled: true };
@@ -243,7 +265,9 @@ class ScenesPass extends Pass {
     for (const p of this.list) {
       if (!p.enabled) continue;
       renderer.shadowMap.needsUpdate = p.shadowsDue();
+      p.hide?.(); // (left out of the picture only: three shows them again before it draws shadows)
       renderer.render(p.scene, camera);
+      showUnseen();
     }
     picture.resolve(readBuffer);
     renderer.autoClear = autoClear;
@@ -520,14 +544,22 @@ const WAYS = {
 let followIn = 3;
 // The bathroom door shuts behind you when you go in (user, 2026-10-15), once each time you go in, and
 // only once Luna is in too; it never swings through you, her, or her boat.
-const bathShut = { armed: false, wait: 0, was: false, hinge: new THREE.Vector3() };
+const bathShut = { armed: false, wait: 0, since: 0, was: false, hinge: new THREE.Vector3() };
 function bathDoorBehind(dt) {
   const D = house.bathDoor, S = D.seg, here = house.roomAt(player.pos.x, player.pos.y) === 'bath';
-  if (here && !bathShut.was) { bathShut.armed = D.state.target > 0.01; bathShut.wait = 0; }
+  if (here && !bathShut.was) { bathShut.armed = D.state.target > 0.01; bathShut.wait = 0; bathShut.since = 0; }
   bathShut.was = here;
   if (!bathShut.armed || !here) return;
   bathShut.wait += dt;
   const reach = Math.hypot(S.bx - S.ax, S.bz - S.az) + 0.35; // all the leaf sweeps, and a little
+  // and she comes straight in after you, 3 s behind you at most (user, 2026-11-03: "so the door shuts and the level
+  // can start"): from wherever she is in the house to just past where the door sweeps, then she sits and waits
+  if (cat.place.name === 'room' && !cat.ride && !cat.dive && !cat.hurrying && !cat.committed && house.roomAt(cat.pos.x, cat.pos.z) !== 'bath') {
+    const B = house.bathroom, x = (B.door.x0 + B.door.x1) / 2 + 0.12, z = B.z0 + reach + 0.45;
+    const [tx, tz] = cat.nav.free(x, z) ? [x, z] : cat.nav.centre(cat.nav.nearest(x, z));
+    cat.hurryTo(tx, tz, Math.max(0.6, 2.2 - bathShut.since)); // (aimed short of 3 s: through the doorway she slows to turn)
+  }
+  bathShut.since += dt;
   const near = (x, z, r = 0) => Math.hypot(x - S.ax, z - S.az) < reach + r;
   if (near(player.pos.x, player.pos.y)) return;
   if (cat.place.name !== 'room' || house.roomAt(cat.pos.x, cat.pos.z) !== 'bath') return; // not till she is in
@@ -689,9 +721,129 @@ const inView = new THREE.Frustum(), viewProj = new THREE.Matrix4();
 function bedroomSeen() {
   const p = camera.position, T = ROOM.T + 0.1;
   if (p.x > -T && p.x < ROOM.W + T && p.z > -T && p.z < ROOM.D + T && p.y > -0.5 && p.y < ROOM.H + 0.5) return true;
+  if (ROOMS[1].inside(p) && house.bathDoor.state.angle <= 0.003) return false; // (from the bathroom, its door shut: none of it — it was drawn behind the walls, user, 2026-11-03)
   camera.updateMatrixWorld();
   inView.setFromProjectionMatrix(viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   return OPENINGS.some((b) => inView.intersectsBox(b));
+}
+
+/**
+ * And the other way round: from inside the bedroom the rest of the house and the yard can only be seen through its
+ * window and its door, so what lies outside both, as seen from your eye, is left out of the house's picture (the
+ * porch, most of the trees, the kitchen and Mum: two million triangles drawn behind the walls). Not out of its
+ * shadows: shown again before they are drawn (`renderer.shadowMap.render`, below). Only meshes with nothing hung on
+ * them, and not ones three is told never to leave out (they move about in ways their bounds don't follow).
+ */
+const GAPS = [
+  [[ROOM.win.x0, ROOM.win.y0, 0], [ROOM.win.x1, ROOM.win.y0, 0], [ROOM.win.x1, ROOM.win.y1, 0], [ROOM.win.x0, ROOM.win.y1, 0]],
+  [[ROOM.door.x0, 0, ROOM.D], [ROOM.door.x1, 0, ROOM.D], [ROOM.door.x1, ROOM.door.h, ROOM.D], [ROOM.door.x0, ROOM.door.h, ROOM.D]],
+].map((q) => q.map((p) => new THREE.Vector3(...p)));
+const AROUND = new THREE.Box3(new THREE.Vector3(-0.3, -1, -0.3), new THREE.Vector3(ROOM.W + 0.3, ROOM.H + 0.6, ROOM.D + 0.3)); // (what is in the bedroom itself, its glass)
+// and the same from inside the bathroom, its door the only gap, and only while it stands open (user, 2026-11-03: "is
+// anything out of sight weighing on the game while the water runs?" — door shut, looking back up the room or at a side
+// wall: the house and the yard behind its walls, 2,600 draws and 8 million triangles a frame, for nothing)
+const BATH = house.bathroom, BATH_H = 2.05;
+const BATH_GAP = [[BATH.door.x0, 0, BATH.z0], [BATH.door.x1, 0, BATH.z0], [BATH.door.x1, BATH_H, BATH.z0], [BATH.door.x0, BATH_H, BATH.z0]].map((p) => new THREE.Vector3(...p));
+const ROOMS = [
+  { inside: (e) => e.x > 0.05 && e.x < ROOM.W - 0.05 && e.z > 0.05 && e.z < ROOM.D - 0.05 && e.y > 0 && e.y < ROOM.H, around: AROUND, gaps: () => GAPS },
+  {
+    inside: (e) => e.x > BATH.x0 + 0.05 && e.x < BATH.x1 - 0.05 && e.z > BATH.z0 + 0.05 && e.z < BATH.z1 - 0.05 && e.y > -0.5 && e.y < ROOM.H,
+    around: new THREE.Box3(new THREE.Vector3(BATH.x0 - 0.3, -1, BATH.z0 - 0.3), new THREE.Vector3(BATH.x1 + 0.3, ROOM.H + 0.6, BATH.z1 + 0.3)),
+    gaps: () => (house.bathDoor.state.angle > 0.003 ? [BATH_GAP] : []),
+  },
+];
+const throughGaps = GAPS.map(() => Array.from({ length: 5 }, () => new THREE.Plane()));
+const unseen = { list: [], at: -1, off: [] }, ball = new THREE.Sphere(), mid = new THREE.Vector3();
+function hideUnseen() {
+  const eye = camera.position, room = ROOMS.find((r) => r.inside(eye));
+  if (!room) return;
+  const gaps = room.gaps(), around = room.around;
+  listUnseen();
+  // the four sides of each gap, as seen from the eye, and the gap's own face
+  gaps.forEach((q, k) => {
+    const planes = throughGaps[k];
+    mid.set(0, 0, 0);
+    for (const p of q) mid.add(p);
+    mid.multiplyScalar(0.25);
+    q.forEach((p, i) => {
+      planes[i].setFromCoplanarPoints(eye, p, q[(i + 1) % 4]);
+      if (planes[i].distanceToPoint(mid) < 0) planes[i].negate();
+    });
+    planes[4].setFromCoplanarPoints(q[0], q[1], q[2]);
+    if (planes[4].distanceToPoint(eye) > 0) planes[4].negate();
+  });
+  for (const o of unseen.list) {
+    if (!o.visible) continue;
+    // (a crowd of copies, or Mum with her bones: bounds of their own; anything else its shape's)
+    if (o.isInstancedMesh || o.isSkinnedMesh) {
+      if (o.boundingSphere === null) o.computeBoundingSphere();
+      ball.copy(o.boundingSphere);
+    } else {
+      if (o.geometry.boundingSphere === null) o.geometry.computeBoundingSphere();
+      ball.copy(o.geometry.boundingSphere);
+    }
+    ball.applyMatrix4(o.matrixWorld);
+    ball.radius += 0.25; // (anything moving may have gone a little further since its matrix was last worked out)
+    if (around.intersectsSphere(ball)) continue;
+    if (gaps.some((q, k) => throughGaps[k].every((pl) => pl.distanceToPoint(ball.center) >= -ball.radius))) continue;
+    o.visible = false;
+    unseen.off.push(o);
+  }
+}
+/** What there is to leave out, looked over every few seconds (Mum came after the house). */
+function listUnseen() {
+  if (frame - unseen.at <= 120) return;
+  unseen.at = frame;
+  unseen.list.length = 0;
+  house.scene.traverse((o) => { if (o.isMesh && o.frustumCulled && !o.children.length) unseen.list.push(o); });
+}
+/** Its bounds in the world, a little more (`ball`). */
+function boundsOf(o) {
+  if (o.isInstancedMesh || o.isSkinnedMesh) {
+    if (o.boundingSphere === null) o.computeBoundingSphere();
+    ball.copy(o.boundingSphere);
+  } else {
+    if (o.geometry.boundingSphere === null) o.geometry.computeBoundingSphere();
+    ball.copy(o.geometry.boundingSphere);
+  }
+  ball.applyMatrix4(o.matrixWorld);
+  ball.radius += 0.25;
+  return ball;
+}
+/**
+ * The bathroom's water mirrors the bathroom, and with its door open the corridor: nothing else of the house can be in
+ * it, so the rest is left out of the reflection (with the water up, it had drawn the house and the yard behind the
+ * walls once more every frame — the angel, the trees, the porch, Mum: 4 million triangles; user, 2026-11-03). Returns
+ * what it hid, to be shown again.
+ */
+const CORRIDOR_AROUND = new THREE.Box3(new THREE.Vector3(-0.5, -1, ROOM.D - 0.3), new THREE.Vector3(11.5, ROOM.H + 0.6, BATH.z0 + 0.3));
+function hideForReflection() {
+  const off = [];
+  if (!ROOMS[1].inside(camera.position)) return off;
+  listUnseen();
+  const keep = house.bathDoor.state.angle > 0.003 ? [ROOMS[1].around, CORRIDOR_AROUND] : [ROOMS[1].around];
+  for (const o of unseen.list) {
+    if (!o.visible) continue;
+    const b = boundsOf(o);
+    if (keep.some((k) => k.intersectsSphere(b))) continue;
+    o.visible = false;
+    off.push(o);
+  }
+  return off;
+}
+function showUnseen() {
+  for (const o of unseen.off) {
+    o.visible = true;
+    o.skeleton?.update(); // (Mum's bones, left as they were while she wasn't looked at: her shadow is drawn from them)
+  }
+  unseen.off.length = 0;
+}
+{
+  const draw = renderer.shadowMap.render;
+  renderer.shadowMap.render = function (...args) {
+    showUnseen();
+    return draw.apply(this, args);
+  };
 }
 
 function animate(obj, dt, rate, apply) {
@@ -845,7 +997,9 @@ function tick() {
       zelpa.drawTv(renderer, who);
     }
     house.bath.simulate(renderer, dt); // its ripples, stepped on
+    const notInIt = hideForReflection();
     house.bath.reflect(renderer, house.scene, camera, [inventory.hand]); // the bathroom's water, mirroring the room
+    for (const o of notInIt) o.visible = true;
     const view = house.cellar.passes(camera);
     roomPass.enabled = view.above && bedroomInView;
     housePass.enabled = view.above;

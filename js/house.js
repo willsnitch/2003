@@ -12,11 +12,12 @@
 import * as THREE from 'three';
 import * as T from './textures.js';
 import { ROOM } from './room.js';
-import { box, boxMM, cyl, deg, mulberry32, canvasTex, HOUSE_SUN } from './util.js';
+import { box, boxMM, cyl, cable, deg, mulberry32, canvasTex, HOUSE_SUN } from './util.js';
 import { curvedScreen, screenMat, takeable } from './props.js';
 import { glowMaterial, UV_TORCH } from './uvtorch.js';
 import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN } from './build.js';
 import { backYard } from './yard.js';
+import { WIND, dappleCuts } from './grove.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as F from './fixtures.js';
@@ -182,7 +183,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
     const f = onWall(g, [win.x0, -t - 0.004], [win.x1, -t - 0.004], [0, -1]);
     casing(f, M, f.userData.width, win.y1 - win.y0, 0, -1);
     f.position.y = win.y0;
-    f.add(boxMM(-0.1, f.userData.width + 0.1, -0.05, 0, -0.09, 0.02, M.trim)); // the sill, standing out to throw the rain off
+    f.add(boxMM(-0.1, f.userData.width + 0.1, -0.05, 0, -0.09, 0, M.trim)); // the sill, standing out to throw the rain off (up to the wall's face: run 2 cm into it, its top lay in one plane with the siding's and the bedroom's reveal and flickered — user, 2026-11-03)
     // its glass as the yard sees it (user, 2026-10-19: "my room has no glass in its window any more"): the
     // bedroom's own is one-sided, seen from the room (two-sided, the room's reflection showed out here, and
     // looked wrong); this one faces out, like the kitchen's window, and from the room isn't there at all
@@ -496,6 +497,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
   const middle = new THREE.Vector3(0.6, 0, 1);
   const sun = outdoorLight(scene, DAY.sun.color, new THREE.Vector3(...DAY.sun.dir).normalize(), middle, 4096); // (its sharp shadows want the finer map: at 2048 a texel is 2 cm)
   const sky = outdoorLight(scene, DAY.sky.color, new THREE.Vector3(...DAY.sky.dir).normalize(), middle);
+  dappleCuts([sun, sky], 59); // (for the spots of light under the trees moving on the lawn: grove.js)
   Object.assign(HOUSE_SUN, { light: sun, wallZ: -t - 0.004 }); // (its shadows on the bedroom window's outer faces: room.js `outward`)
   const SUN = DAY.sun.house, SKY = DAY.sky.house;
   // the bedroom's light, spilling out of its door into the corridor while the door is open. It stands
@@ -538,6 +540,14 @@ export function buildHouse(renderer, bedroomM, ctx) {
     if (i < 2) indoorLamps.push(l);
     return l;
   });
+  // and its light out of its door into the corridor while the door is open (user, 2026-11-03: "it stops on the
+  // threshold"): the lit white room seen through the doorway is a lamp of its own to the corridor. In the doorway
+  // itself, turned away from the bathroom, so its cone, not a shadow, keeps it to the corridor (one more shadowed
+  // light in here and Mum stops drawing: she has one texture to spare)
+  const bathSpill = new THREE.SpotLight(0xeef3ff, 0, 4.2, 1.15, 1, 2);
+  bathSpill.position.set((DOORS.bath.x0 + DOORS.bath.x1) / 2, 1.45, C.z1 + t / 2);
+  bathSpill.target.position.set(bathSpill.position.x, 0.6, C.z0 - 0.6);
+  scene.add(bathSpill, bathSpill.target);
   // the standard lamp by the sofa
   const lamp = shadowedLamp(0xffb36a, 1.6, 7, [-4.62, 1.515, 8.55]); // (in its bulb: below.)
   scene.add(lamp);
@@ -640,7 +650,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
   // east: open, it would stand in front of a switch on that side): off, the room is dark but for what comes
   // in at the door
   let bathLit = true;
-  const BATH_LAMP = bathLamps[0].intensity, DIFFUSER = diffuser.emissiveIntensity;
+  const BATH_LAMP = bathLamps[0].intensity, DIFFUSER = diffuser.emissiveIntensity, BATH_SPILL = 2.2; // (BATH_SPILL: its light out of the door, the door wide open)
   const lightSwitch = F.wallSwitch(cool);
   lightSwitch.position.set(DOORS.bath.x0 - 0.15, 1.2, B.z0);
   g.add(lightSwitch);
@@ -737,6 +747,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
       return true;
     },
     update(dt, time, eye, bedroomDoorOpen, bedroomLit = 1) {
+      WIND.time.value = time; // (the breeze in the leaves: grove.js)
       doorTick++;
       // the bathroom with its light off: dark, but for what comes in at the door, the more the wider it stands
       bath.water.volume.dim(bathLit ? 1 : 0.025 + 0.07 * THREE.MathUtils.clamp(doors[1].state.angle / deg(70), 0, 1));
@@ -783,6 +794,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
       hemiOut.intensity = THREE.MathUtils.lerp(DAY.hemi.house, DAY.hemi.yard.intensity * YARD_LIGHT, fill.k);
       yard.brighten(gain + (1 - YARD_LIGHT) * 0.6 * fill.k); // (the sky itself dimmed less)
       spill.intensity = DAY.spillPower * bedroomDoorOpen * bedroomLit; // (as much light as the bedroom has: less with its blind shut)
+      bathSpill.intensity = bathLit ? BATH_SPILL * THREE.MathUtils.clamp(doors[1].state.angle / deg(70), 0, 1) : 0;
       if (Math.abs(bedroomDoorOpen - bedroomDoor) > 1e-3) {
         bedroomDoor = bedroomDoorOpen;
         if (doorTick % 4 === 0) mark([spill], 1); // the bedroom door moved: what it lets out has changed
@@ -895,21 +907,26 @@ const FAN_SPEED = 0.9; // (the air conditioner's fan, radians a second)
 /**
  * One jam of the fan, as lengths of time each with its speed (`v(u)`, u 0…1 along it), by dice `r`. It may catch sharply and break free
  * sharply, but it never stops out of nothing: first it shows it is struggling, dragging and uneven (user, 2026-11-02). 0 it drags a
- * moment, catches, breaks free at once; 1 it struggles for longer, hesitating, catches, kicks and sticks again, then goes; 2 it
- * runs down slower and slower, catches hard, stays stuck a good while, then breaks free and races before it settles.
+ * moment, catches, gets going again; 1 it struggles for longer, hesitating, catches, tries and sticks again, then goes; 2 it
+ * runs down slower and slower, catches hard, stays stuck a good while, then gets going and races before it settles. From still it
+ * always starts slowly, half a second creeping round (`wake`).
  */
 function fanJam(r) {
   const ease = (u) => u * u * u * (u * (u * 6 - 15) + 10), N = FAN_SPEED, kind = Math.floor(r() * 3), parts = [];
   const lerp = (dur, a, b) => parts.push([dur, (u) => a + (b - a) * ease(u)]);
   const still = (dur) => parts.push([dur, () => 0]);
   const drag = (dur, level, beats, dip) => parts.push([dur, (u) => level * (1 - dip * Math.sin(Math.PI * beats * u) ** 2)]); // (uneven, labouring round)
+  // (off again from still: half a second creeping round, slowly picking up, before it gets going — not with a jerk: user, 2026-11-03)
+  const wake = (level) => parts.push([0.5, (u) => level * u * u]);
   if (kind === 0) {
     const low = N * (0.5 + r() * 0.2);
     lerp(0.5 + r() * 0.4, N, low);
     drag(0.5 + r() * 0.8, low, 1 + Math.floor(r() * 2), 0.3 + r() * 0.25);
     lerp(0.14 + r() * 0.14, low, 0);
     still(0.25 + r() * 0.8);
-    lerp(0.1 + r() * 0.08, 0, N * 1.25);
+    const w = N * (0.3 + r() * 0.1);
+    wake(w);
+    lerp(0.2 + r() * 0.1, w, N * 1.25);
     lerp(0.4 + r() * 0.3, N * 1.25, N);
   } else if (kind === 1) {
     const low = N * (0.42 + r() * 0.2);
@@ -917,11 +934,13 @@ function fanJam(r) {
     drag(1.2 + r() * 1.5, low, 2 + Math.floor(r() * 3), 0.45 + r() * 0.3);
     lerp(0.14 + r() * 0.12, low, 0);
     still(0.35 + r() * 0.7);
-    const kick = 0.75 + r() * 0.5; // (a kick that doesn't take)
-    lerp(0.08 + r() * 0.05, 0, kick);
+    const kick = N * (0.25 + r() * 0.15); // (a try that doesn't take)
+    wake(kick);
     lerp(0.15 + r() * 0.12, kick, 0);
     still(0.3 + r() * 0.7);
-    lerp(0.1 + r() * 0.08, 0, N * 1.2);
+    const w = N * (0.3 + r() * 0.1);
+    wake(w);
+    lerp(0.2 + r() * 0.1, w, N * 1.2);
     lerp(0.4 + r() * 0.3, N * 1.2, N);
   } else {
     const low = N * (0.2 + r() * 0.12), surge = N * (1.5 + r() * 0.4);
@@ -929,7 +948,9 @@ function fanJam(r) {
     drag(0.4 + r() * 0.5, low, 1, 0.4 + r() * 0.3);
     lerp(0.1 + r() * 0.08, low, 0);
     still(1.8 + r() * 2.8);
-    lerp(0.1 + r() * 0.06, 0, surge);
+    const w = N * (0.3 + r() * 0.1);
+    wake(w);
+    lerp(0.25 + r() * 0.1, w, surge);
     lerp(1 + r() * 0.8, surge, N);
   }
   return parts;
@@ -1263,8 +1284,11 @@ function calendar(g, x, y, z) {
  */
 function corridorFill(root) {
   const box = new THREE.Box3(), done = new Set();
+  // (`centroid`: the point taken on the surface itself — at its edge, a wall or the rail's top seen side-on was worked
+  // out past its end, out past the box, and lit up at full strength: a line of light down the far corners and along
+  // the rail at the end, as you moved — user, 2026-11-03)
   const glsl = `
-varying vec3 vCorridor;
+centroid varying vec3 vCorridor;
 vec3 corridorFill( vec3 p ) {
   if ( p.x < ${C.x0.toFixed(3)} || p.x > ${(C.x1 + 0.3).toFixed(3)} || p.z < ${(D - 0.005).toFixed(3)} || p.z > ${(C.z1 + t - 0.002).toFixed(3)} ) return vec3( 1.0 ); // (the doorways along it too, their carpet with it)
   float d = p.x - ${C.x0.toFixed(3)};
@@ -1283,7 +1307,7 @@ vec3 corridorFill( vec3 p ) {
       const before = m.onBeforeCompile, key = m.customProgramCacheKey.bind(m);
       m.onBeforeCompile = (sh, r) => {
         before.call(m, sh, r);
-        sh.vertexShader = 'varying vec3 vCorridor;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+        sh.vertexShader = 'centroid varying vec3 vCorridor;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
   vec4 cfW = vec4( transformed, 1.0 );
   #ifdef USE_INSTANCING
     cfW = instanceMatrix * cfW;
@@ -1951,8 +1975,9 @@ function kitchen(g, M, mat, ctx) {
   ctx.colliders.push({ type: 'box', x0: X0, x1: X0 + DEEP + 0.025, z0: run2[0], z1: run2[1], top: TOP, stand: true, surface: 'wood' });
   // on it: the kettle, the toaster, the microwave
   kettle(g, mat, X0 + 0.32, TOP, 1.0);
-  toasterAt(g, M, X0 + 0.2, 1.4, TOP);
-  microwaveAt(g, M, X0, TOP, 1.92);
+  const toaster = toasterAt(g, M, X0 + 0.22, 1.38, TOP);
+  const micro = microwaveAt(g, M, X0, TOP, 1.92);
+  wallSocket(g, M, X0 + 0.006, TOP, 1.622, toaster, micro); // (on the tiles between them, both plugged into it: user, 2026-11-03)
   airConditioner(g, ctx, -4.42, 1.6, -t); // (outside, on this wall: over the hose's tap and to its right, seen from the yard — clear of the downpipe by the corner)
   // right of the cooker, a wooden chopping board with a kitchen knife left lying on it; in the corner a pot
   // of what you cook with, a ladle and a wooden spatula standing in it (user, 2026-10-18)
@@ -2141,12 +2166,12 @@ function enamel(part, o) {
  * two slots in its top with rims round them, its lever up in a slot in its end and a browning knob under it, on a
  * black bakelite base on four feet. Old: the chrome smudged and swirled with scratches, pitted (T.chromeWearTex),
  * browned round the slots by the heat, grimy along its foot, a dent in its front; crumbs round it on the worktop,
- * most in front. Long side to the room, a little askew; x, z: its middle.
+ * most in front. Long side to the room, turned out from the wall; x, z: its middle. Returns its group.
  */
 function toasterAt(g, M, x, z, TOP) {
   const ts = new THREE.Group();
   ts.position.set(x, TOP, z);
-  ts.rotation.y = Math.PI / 2 + deg(5);
+  ts.rotation.y = Math.PI / 2 - deg(14); // (pulled out from the wall and left turned, its lever end out towards you — user, 2026-11-03: "too straight")
   g.add(ts);
   const put = (geo, m) => { const o = new THREE.Mesh(geo, m); o.castShadow = o.receiveShadow = true; ts.add(o); return o; };
   const LEN = 0.26, WID = 0.135, BH = 0.018, HB = 0.165, BV = 0.03, hx = LEN / 2, TOPY = BH + HB;
@@ -2207,6 +2232,7 @@ function toasterAt(g, M, x, z, TOP) {
     bits.push(new THREE.IcosahedronGeometry(1, 0).scale(sz * (0.7 + r() * 0.6), sz * 0.5, sz * (0.7 + r() * 0.6)).rotateY(r() * 6.3).translate(cx, sz * 0.35, cz));
   }
   put(mergeGeometries(bits), std({ color: 0xa8824e, roughness: 0.9 }));
+  return ts;
 }
 
 /**
@@ -2500,6 +2526,86 @@ function microwaveAt(g, M, wall, TOP, zc) {
   const zip = add(bag, new THREE.Mesh(rbox(-0.066, 0.066, -0.003, 0.003, -0.0035, 0.0035, 0.001), std({ color: 0x92abbd, roughness: 0.45 })));
   zip.position.set(zx, zy, zz);
   zip.rotation.x = -1.15;
+  return mw;
+}
+
+/**
+ * The socket the toaster and the microwave are plugged into (user, 2026-11-03): an old double one on the tiles between
+ * them, its plate gone the yellow of old plastic, grimy round its edges and greasy where hands go for the plugs; not
+ * quite level. The toaster's plug, black, straight, in the top; the microwave's, three-pinned, dirty white, its lead
+ * out of its foot, in the bottom. Their leads down the tiles and over the worktop to the back of each, slack.
+ * `wall`: the tiles' face; `zc`: its middle along the wall; `toaster`, `micro`: their groups.
+ */
+function wallSocket(g, M, wall, TOP, zc, toaster, micro) {
+  const sk = new THREE.Group();
+  sk.position.set(wall, TOP + 0.19, zc);
+  sk.rotation.set(0, Math.PI / 2, deg(1.7)); // (its face to the room, its x along the wall towards −z)
+  g.add(sk);
+  const put = (geo, m) => { const o = new THREE.Mesh(geo, m); o.castShadow = o.receiveShadow = true; sk.add(o); return o; };
+  const PW = 0.07, PH = 0.115;
+  const plate = canvasTex(140, 230, (c, w, h) => {
+    const r = mulberry32(6203);
+    c.fillStyle = '#d4caaf'; // old plastic, gone a little yellow
+    c.fillRect(0, 0, w, h);
+    const blot = (x, y, rx, ry, rgba) => {
+      const gr = c.createRadialGradient(x, y, 0, x, y, rx);
+      gr.addColorStop(0, `rgba(${rgba})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      c.save(); c.translate(x, y); c.scale(1, ry / rx); c.translate(-x, -y); c.fillStyle = gr; c.fillRect(x - rx, y - rx, rx * 2, rx * 2); c.restore();
+    };
+    for (let i = 0; i < 26; i++) blot(r() * w, r() * h, 10 + r() * 30, 8 + r() * 24, r() < 0.7 ? '150,124,78,0.07' : '220,212,190,0.1'); // yellower here, paler there
+    // grime in along its edges, most along the foot (what runs down the tiles stops there) and the wall side's
+    for (let y = 0; y < h; y += 2) for (const [x, k] of [[0, 1], [w - 1, 0.7]]) { c.fillStyle = `rgba(84,66,40,${(0.05 + r() * 0.06) * k})`; c.fillRect(x - 3, y, 5 + r() * 3, 2); }
+    let gr = c.createLinearGradient(0, h, 0, h - 26);
+    gr.addColorStop(0, 'rgba(78,60,36,0.28)'); gr.addColorStop(1, 'rgba(78,60,36,0)');
+    c.fillStyle = gr; c.fillRect(0, h - 26, w, 26);
+    gr = c.createLinearGradient(0, 0, 0, 14);
+    gr.addColorStop(0, 'rgba(78,60,36,0.14)'); gr.addColorStop(1, 'rgba(78,60,36,0)');
+    c.fillStyle = gr; c.fillRect(0, 0, w, 14);
+    // greasy fingers round the plugs, pulling them out and pushing them in: the lower one more (the toaster's is
+    // left in; the microwave's comes out when the fuse goes)
+    for (const [cy, n] of [[0.33, 5], [0.67, 8]]) for (let k = 0; k < n; k++) blot(w * (0.5 + (r() - 0.5) * 0.75), h * (cy + (r() - 0.5) * 0.22), 6 + r() * 7, 5 + r() * 5, `102,82,50,${0.07 + r() * 0.09}`);
+    for (let k = 0; k < 2; k++) blot(w * (0.2 + r() * 0.6), h * (0.85 + r() * 0.1), 1.5 + r() * 1.5, 1.5 + r() * 1.5, '92,62,30,0.4'); // spatters, dried
+    c.strokeStyle = 'rgba(70,56,40,0.14)'; c.lineWidth = 0.6; // a scratch or two
+    for (let k = 0; k < 2; k++) { const x = r() * w, y = r() * h, a = r() * 6.3, l = 6 + r() * 14; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); }
+  });
+  const ivory = std({ map: plate, roughness: 0.5 });
+  const faceMat = std({ color: 0xbfb193, roughness: 0.45 }); // (the outlets' faces: the same plastic, less faded where the plate covered nothing)
+  // the plate: a hair off the tiles (it sits on their glaze), its edges rounded, a chip out of its foot at the wall end
+  const pg = rbox(-PW / 2, PW / 2, -PH / 2, PH / 2, 0.0006, 0.0066, 0.0024);
+  const pp = pg.attributes.position;
+  for (let i = 0; i < pp.count; i++) {
+    const x = pp.getX(i), y = pp.getY(i), z = pp.getZ(i);
+    const chip = Math.max(0, 1 - Math.hypot(x - 0.027, y + PH / 2) / 0.007); // (its corner knocked off, from below)
+    pp.setXYZ(i, x - 0.0018 * chip * Math.sign(x), y + 0.0026 * chip, z - 0.0016 * chip * (z > 0.004 ? 1 : 0));
+  }
+  pg.computeVertexNormals();
+  put(pg, ivory);
+  // the outlets, through the plate, their faces a little proud of it; the screw between them, its slot turned as it was left
+  for (const y of [0.0195, -0.0195]) put(rbox(-0.017, 0.017, y - 0.0155, y + 0.0155, 0.004, 0.0089, 0.005), faceMat);
+  put(new THREE.CylinderGeometry(0.0038, 0.0042, 0.0016, 16).rotateX(Math.PI / 2).translate(0, 0, 0.0072), std({ color: 0x9a8f78, metalness: 0.6, roughness: 0.5 }));
+  put(new THREE.BoxGeometry(0.0064, 0.0008, 0.0008).rotateZ(deg(38)).translate(0, 0, 0.0081), std({ color: 0x2a2620, roughness: 0.8 }));
+  // the plugs, home in their outlets: the toaster's black and straight, its lead out of its back; the microwave's a
+  // flat one, dirty white, its lead out of its foot
+  const black = M.rubber, white = std({ color: 0xb4ab98, roughness: 0.55 });
+  put(rbox(-0.0125, 0.0125, 0.0195 - 0.0115, 0.0195 + 0.0115, 0.0089, 0.027, 0.004), black);
+  put(new THREE.CylinderGeometry(0.0034, 0.0046, 0.012, 12).rotateX(Math.PI / 2).translate(0, 0.0195, 0.032), black); // (the sleeve the lead comes out of)
+  put(rbox(-0.0155, 0.0155, -0.0195 - 0.0165, -0.0195 + 0.0125, 0.0089, 0.0235, 0.005), white);
+  put(new THREE.CylinderGeometry(0.0046, 0.0036, 0.011, 12).translate(0.002, -0.0195 - 0.0205, 0.017), white);
+  sk.updateMatrixWorld(true);
+  toaster.updateMatrixWorld(true);
+  micro.updateMatrixWorld(true);
+  const at = (o, x, y, z) => g.worldToLocal(o.localToWorld(new THREE.Vector3(x, y, z))).toArray();
+  const lie = TOP + 0.0034; // (on the worktop)
+  // the toaster's: out of the plug, down the tiles in a slack curve, over the worktop and in under the back of its base
+  g.add(cable([
+    at(sk, 0, 0.0195, 0.037), at(sk, 0.001, 0.012, 0.047), at(sk, 0.004, -0.03, 0.05), at(sk, 0.008, -0.11, 0.04), at(sk, 0.012, -0.175, 0.045),
+    [wall + 0.05, lie, zc + 0.02], [wall + 0.075, lie, zc - 0.035], at(toaster, -0.128, 0, -0.118), at(toaster, -0.1, 0, -0.098), at(toaster, -0.09, 0.006, -0.079),
+  ], 0.0032, black, { floor: TOP }));
+  // the microwave's: out of the back of its case, down behind it, along the worktop out past its end, up to the plug
+  g.add(cable([
+    at(micro, 0.17, 0.05, -0.181), at(micro, 0.185, 0.02, -0.196), at(micro, 0.2, 0, -0.207), at(micro, 0.255, 0, -0.205),
+    at(sk, -0.02, -0.19, 0.03), at(sk, -0.004, -0.16, 0.022), at(sk, 0.004, -0.1, 0.024), at(sk, 0.002, -0.058, 0.018), at(sk, 0.002, -0.0465, 0.017),
+  ], 0.0035, white, { floor: TOP }));
 }
 
 /**

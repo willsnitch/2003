@@ -324,28 +324,129 @@ function leafSpots(G, L) {
 }
 
 /**
+ * The air (user, 2026-11-03: "a light breeze that moves the leaves a little, so the place seems more alive"): from the
+ * south-west, in breezes now and then that go over the garden at about 3 m/s — one tree takes one before the next —
+ * and a quarter of it between them (`breeze`); only the willow's shoots swing all the time (`windGust`). It moves the leaves, the
+ * shoots and the moss, in their shaders; not their shadows (the sun's is drawn once and kept), and they are lit as in
+ * their shadows where they hang at rest, so none flickers in its own. On the lawn, where the light comes through a
+ * crown, its spots move a few centimetres with the leaves (`dappled`).
+ */
+export const WIND = {
+  time: { value: 0 }, // s (house.update)
+  ground: { value: 0 }, // the yard's ground, its height in the world (yard.js)
+  dappleMask: { value: null }, // where the sun (red) and the sky (green) reach the ground through leaves (leafLight)
+  dappleBox: { value: new THREE.Vector4() }, // that picture's corner, world x and z, and 1 / its size
+  dappleUV: { value: [new THREE.Vector2(0.02, 0.02), new THREE.Vector2(0.02, 0.02)] }, // a metre across the sun's and the sky's shadow maps, in their pictures (house.js)
+  dappleCut: { value: [new THREE.Vector4(), new THREE.Vector4()] }, // how far up their rays leaves begin and are, and what is too low to move (house.js dappleCuts)
+};
+
+/**
+ * For each of the sun and the sky (their directional lights, in that order), how far up its ray a thing is, as a share
+ * of its shadow map's depth (`depth` m), when it stands so many metres over the ground: leaves from 3 m up (their
+ * spots move), things 0.8–2.6 m tall (a flamingo, the fence, the shed, the swing: theirs stay put). The grass's blades,
+ * lower, count as neither.
+ */
+export function dappleCuts(lights, depth) {
+  lights.slice(0, 2).forEach((l, i) => {
+    const up = Math.max(0.05, l.position.clone().sub(l.target.position).normalize().y), k = 1 / (up * depth);
+    WIND.dappleCut.value[i].set(3.0 * k, 3.8 * k, 0.8 * k, 2.6 * k);
+    WIND.dappleUV.value[i].set(1 / (l.shadow.camera.right - l.shadow.camera.left), 1 / (l.shadow.camera.top - l.shadow.camera.bottom));
+  });
+}
+const WIND_GLSL = `
+uniform float uWindTime;
+const vec3 WIND_DIR = vec3( 0.8, 0.0, -0.6 ), WIND_SIDE = vec3( 0.6, 0.0, 0.8 );
+float windHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+// how hard it blows at p now, never still: 0.15 (a lull) to 1 (the willow's: user, 2026-11-03, "the only movement I like")
+float windGust( vec2 p ) {
+	float a = uWindTime * 0.32 - dot( p, WIND_DIR.xz ) * 0.11;
+	return clamp( 0.55 + 0.22 * sin( a ) + 0.14 * sin( a * 2.31 + 1.7 ) + 0.09 * sin( a * 4.7 + 0.4 ), 0.15, 1.0 );
+}
+float windDice( float p ) { p = fract( p * 0.1031 ); p *= p + 33.33; p *= p + p; return fract( p ); } // (no sin: steady on any GPU, at any hour)
+float windNoise( float x ) {
+	float i = floor( x ), f = fract( x );
+	f = f * f * ( 3.0 - 2.0 * f );
+	return mix( windDice( i ), windDice( i + 1.0 ), f );
+}
+// and for everything else, a breeze now and then (user, 2026-11-03: "light, slow and random, not too repeated, as if a
+// breeze moved the leaves now and then, not all the time"): a breath every 20–40 s or so, coming up and dying away
+// over a few seconds, never on a beat; it crosses the garden at about 3 m/s. Between them never quite still: a
+// quarter of it (user, 2026-11-03: "the leaves never really still, a quarter of the speed between one breeze and the next")
+float breeze( vec2 p ) {
+	float a = uWindTime * 0.11 - dot( p, WIND_DIR.xz ) * 0.035;
+	float n = windNoise( a ) * 0.7 + windNoise( a * 2.37 + 13.1 ) * 0.3;
+	return 0.25 + 0.75 * smoothstep( 0.6, 0.88, n );
+}
+`;
+
+/**
+ * How a card moves in the wind (`sway`): 'crown' — a spray on a branch: the branch sways slowly, more the higher it
+ * is, and the spray flutters on it, hanging ones about where they hang from (`stiff` below 1: needles, less); 'hang' —
+ * a shoot or a beard hanging from its top: it swings like a pendulum at its own length's pace, more the further down,
+ * its tip lifting a little as it goes out (`amp`: how far the tip goes, as a share of its length, in a full gust).
+ */
+function windVertex(sway, hang, stiff, amp, { steady = false, pace = 1 } = {}) {
+  // (a spray: in a breeze its branch leans and sways slowly, and it stirs on it, each at its own rate; in between, a quarter of that)
+  const crown = `
+		float above = clamp( ( org.y - uWindGround ) / 10.0, 0.08, 1.0 ) * ${stiff.toFixed(2)}, rate = 0.75 + 0.5 * windHash( org.xz * 3.7 + 1.3 );
+		wo = ( WIND_DIR * ( 0.6 + 0.4 * sin( t * 0.9 * rate + ph ) ) + WIND_SIDE * 0.4 * sin( t * 0.63 * rate + ph * 1.7 ) ) * gst * 0.022 * above;
+		float lean = position.y - ${hang ? '0.5' : '0.0'}; // (from where it hangs)
+		wo += normalize( cross( ax, ay ) ) * ( position.x * length( ax ) * sin( t * 2.9 * rate + own ) * 0.022 + lean * length( ay ) * sin( t * 2.3 * rate + own * 1.3 ) * 0.028 ) * gst * ${stiff.toFixed(2)};`;
+  const hanging = `
+		float len = length( ay ), down = pow( clamp( 0.5 - position.y, 0.0, 1.0 ), 1.6 ), pace = sqrt( 9.8 / ( 0.6 * len ) ) * ${pace.toFixed(2)};
+		float near = 6.2832 * ( 0.5 + 0.5 * sin( org.x * 2.3 + org.z * 1.7 ) ); // (neighbours together, more or less)
+		wo = ( WIND_DIR * ( 0.55 * gst + 0.45 * gst * sin( t * pace + near ) ) + WIND_SIDE * 0.5 * gst * sin( t * pace * 0.83 + near * 1.7 ) ) * ${amp.toFixed(3)} * len * down;
+		wo.y += dot( wo, wo ) * 0.5 / max( len, 0.3 );`;
+  return `#include <project_vertex>
+	{
+		vec3 org = ( modelMatrix * vec4( instanceMatrix[ 3 ].xyz, 1.0 ) ).xyz;
+		vec3 ax = mat3( modelMatrix ) * instanceMatrix[ 0 ].xyz, ay = mat3( modelMatrix ) * instanceMatrix[ 1 ].xyz, wo;
+		float t = uWindTime, gst = ${sway === 'hang' && steady ? 'windGust' : 'breeze'}( org.xz ), ph = windHash( floor( org.xz * 0.6 ) ) * 6.2832, own = windHash( org.xz * 7.31 + org.y ) * 6.2832;
+		${sway === 'hang' ? hanging : crown}
+		mvPosition.xyz += mat3( viewMatrix ) * wo; // (moved where it is seen, not where it is lit from the shadow map)
+		gl_Position = projectionMatrix * mvPosition;
+	}`;
+}
+
+/** `mat`, instanced cards made some other way (the trees round about), moving in the wind as leafCards' do (windVertex). */
+export function windy(mat, { sway = 'crown', hang = false, stiff = 1, amp = 0.04, steady = false, pace = 1 } = {}) {
+  const before = mat.onBeforeCompile, key = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (sh, r) => {
+    before.call(mat, sh, r);
+    sh.uniforms.uWindTime = WIND.time;
+    sh.uniforms.uWindGround = WIND.ground;
+    sh.vertexShader = 'uniform float uWindGround;\n' + WIND_GLSL + sh.vertexShader.replace('#include <project_vertex>', windVertex(sway, hang, stiff, amp, { steady, pace }));
+  };
+  mat.customProgramCacheKey = () => key() + `|windy-${sway}${stiff}${steady ? 's' : ''}${pace}`;
+  return mat;
+}
+
+/**
  * A crown's leaves as instanced cards: lit as a round crown is — each card's normal points out of the crown's
  * middle (`lift`: how much its height counts in that, 1.3 a round crown, less a curtain). `near`: from how
  * close to the eye a card begins to thin away to nothing, and where it is whole (the willow's: you go in
- * through them).
+ * through them). `sway`, `stiff`, `amp`: how it moves in the wind (windVertex).
  */
-export function leafCards(spots, map, tint, hang, r, place = null, { lift = 1.3, near = null } = {}) {
+export function leafCards(spots, map, tint, hang, r, place = null, { lift = 1.3, near = null, sway = 'crown', stiff = 1, amp = 0.04, steady = false, pace = 1 } = {}) {
   const mid = new THREE.Vector3();
   for (const [x, y, z] of spots) mid.add(new THREE.Vector3(x, y, z));
   mid.divideScalar(Math.max(1, spots.length));
-  const geo = new THREE.PlaneGeometry(1, 1);
+  const geo = sway === 'hang' ? new THREE.PlaneGeometry(1, 1, 1, 8) : new THREE.PlaneGeometry(1, 1); // (a hanging one bends along its length)
   const bend = new Float32Array(spots.length * 3);
   const mat = new THREE.MeshStandardMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85 });
   mat.onBeforeCompile = (sh) => {
-    sh.vertexShader = 'attribute vec3 aBend;\nvarying float vFacing;\n' + sh.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = normalize( aBend );')
-      .replace('#include <project_vertex>', `#include <project_vertex>
+    sh.uniforms.uWindTime = WIND.time;
+    sh.uniforms.uWindGround = WIND.ground;
+    sh.vertexShader = 'attribute vec3 aBend;\nvarying float vFacing;\nuniform float uWindGround;\n' + WIND_GLSL + sh.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = normalize( aBend );')
+      .replace('#include <project_vertex>', `${windVertex(sway, hang, stiff, amp, { steady, pace })}
         vFacing = abs( dot( normalize( mat3( modelViewMatrix ) * mat3( instanceMatrix ) * vec3( 0.0, 0.0, 1.0 ) ), normalize( - mvPosition.xyz ) ) );`);
     // a card seen edge on is a thin dark line across the crown (user, 2026-10-17, low on the oak): it fades out
     sh.fragmentShader = 'varying float vFacing;\n' + sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
       .replace('#include <alphatest_fragment>', 'diffuseColor.a *= smoothstep( 0.06, 0.28, vFacing );\n' + (near ? `diffuseColor.a *= smoothstep( ${near[0].toFixed(2)}, ${near[1].toFixed(2)}, vViewPosition.z );\n` : '') + '#include <alphatest_fragment>');
   };
-  mat.customProgramCacheKey = () => 'grove-leaves' + (near ? `-near${near.join('-')}` : '');
+  mat.customProgramCacheKey = () => 'grove-leaves' + (near ? `-near${near.join('-')}` : '') + `-${sway}${hang ? 'h' : ''}${stiff}-${amp}${steady ? 's' : ''}${pace}`;
   const mesh = new THREE.InstancedMesh(geo, mat, spots.length);
+  mesh.userData.leaves = true; // (leafLight looks for them)
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color(), n = new THREE.Vector3();
   spots.forEach(([x, y, z, size, yaw, tilt, roll, lenX, lenY], i) => {
     p.set(x, y, z);
@@ -366,6 +467,131 @@ export function leafCards(spots, map, tint, hang, r, place = null, { lift = 1.3,
   geo.setAttribute('aBend', new THREE.InstancedBufferAttribute(bend, 3));
   mesh.castShadow = mesh.receiveShadow = true;
   return mesh;
+}
+
+/**
+ * Where the sun reaches the ground of the yard (`g`'s frame, ground at 0) through leaves: from each spot of `area` a ray
+ * to the sun (`sunDir`, the way its light goes), through a grid of where the leaf cards are; 1 where it passes through
+ * a crown, 0 where only open sky or something else stands in the way — so the spots of sun move under trees and
+ * nowhere else (not a fence's shadow, nor a neighbour's house's). Into WIND, with `offset` from `g`'s frame to the world.
+ */
+export function leafLight(g, area, dirs, offset) {
+  g.updateMatrixWorld(true);
+  const inv = g.matrixWorld.clone().invert(), m = new THREE.Matrix4(), rel = new THREE.Matrix4();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(), cards = [];
+  g.traverse((o) => {
+    if (!o.isInstancedMesh || !o.userData.leaves || !o.castShadow) return;
+    rel.multiplyMatrices(inv, o.matrixWorld);
+    for (let i = 0; i < o.count; i++) {
+      o.getMatrixAt(i, m);
+      m.premultiply(rel).decompose(p, q, s);
+      cards.push(p.x, p.y, p.z, Math.max(Math.abs(s.x), Math.abs(s.y)) * 0.4);
+    }
+  });
+  // the leaves, in half-metre cells
+  const V = 0.5, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < cards.length; i += 4) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], cards[i + k] - cards[i + 3]); hi[k] = Math.max(hi[k], cards[i + k] + cards[i + 3]); }
+  const n = [0, 1, 2].map((k) => Math.max(1, Math.ceil((hi[k] - lo[k]) / V) + 1)), full = new Uint8Array(n[0] * n[1] * n[2]);
+  const cell = (x, y, z) => { const i = Math.floor((x - lo[0]) / V), j = Math.floor((y - lo[1]) / V), k = Math.floor((z - lo[2]) / V); return i < 0 || j < 0 || k < 0 || i >= n[0] || j >= n[1] || k >= n[2] ? -1 : (k * n[1] + j) * n[0] + i; };
+  for (let i = 0; i < cards.length; i += 4) {
+    const r = cards[i + 3];
+    for (let dx = -r; dx <= r + 1e-6; dx += V) for (let dy = -r; dy <= r + 1e-6; dy += V) for (let dz = -r; dz <= r + 1e-6; dz += V) {
+      const c = cell(cards[i] + dx, cards[i + 1] + dy, cards[i + 2] + dz);
+      if (c >= 0) full[c] = 1;
+    }
+  }
+  // a ray from each spot of the ground to the sun, and one to the sky: how many cells of leaves each goes through
+  const N = 128, STEP = 0.25, out = new Uint8Array(N * N * 2);
+  dirs.forEach((dir, ch) => {
+    const mask = new Float32Array(N * N), to = new THREE.Vector3(...dir).normalize().negate();
+    for (let b = 0; b < N; b++) for (let a = 0; a < N; a++) {
+      const x0 = area.x0 + ((a + 0.5) / N) * (area.x1 - area.x0), z0 = area.z0 + ((b + 0.5) / N) * (area.z1 - area.z0);
+      let hits = 0, last = -1;
+      for (let d = 0.3; ; d += STEP) {
+        const x = x0 + to.x * d, y = 0.05 + to.y * d, z = z0 + to.z * d;
+        if (y > hi[1]) break;
+        const c = cell(x, y, z);
+        if (c >= 0 && full[c] && c !== last) hits++;
+        last = c;
+      }
+      mask[b * N + a] = Math.min(1, hits / 3);
+    }
+    // softened, so that it comes and goes over half a metre or so
+    const soft = new Float32Array(N * N);
+    for (let pass = 0; pass < 2; pass++) {
+      const [from, into] = pass ? [soft, mask] : [mask, soft];
+      for (let b = 0; b < N; b++) for (let a = 0; a < N; a++) {
+        let sum = 0, w = 0;
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const aa = a + i, bb = b + j; if (aa >= 0 && bb >= 0 && aa < N && bb < N) { sum += from[bb * N + aa]; w++; } }
+        into[b * N + a] = sum / w;
+      }
+    }
+    for (let i = 0; i < N * N; i++) out[i * 2 + ch] = Math.round(mask[i] * 255);
+  });
+  const tex = new THREE.DataTexture(out, N, N, THREE.RGFormat, THREE.UnsignedByteType);
+  tex.magFilter = tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  WIND.dappleMask.value = tex;
+  WIND.dappleBox.value.set(area.x0 + offset.x, area.z0 + offset.z, 1 / (area.x1 - area.x0), 1 / (area.z1 - area.z0));
+  return tex;
+}
+
+/**
+ * The ground `m` with the sun's spots on it moving as the leaves do: its shadow map is drawn once and kept, so where
+ * the sun comes through a crown (WIND.dappleMask) the map is looked up a few centimetres off, this way and that, a
+ * slow sway and a quicker flutter, in the gusts — and only where what stands in the sun's way is high up its ray
+ * (a crown: not a fence, the shed or the swing, whose shadows stay where they are).
+ */
+export function dappled(m) {
+  const before = m.onBeforeCompile, key = m.customProgramCacheKey.bind(m);
+  m.onBeforeCompile = (sh, r) => {
+    before.call(m, sh, r);
+    Object.assign(sh.uniforms, { uWindTime: WIND.time, uDappleMask: WIND.dappleMask, uDappleBox: WIND.dappleBox, uDappleUV: WIND.dappleUV, uDappleCut: WIND.dappleCut });
+    sh.vertexShader = 'varying vec2 vDapXZ;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvDapXZ = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;');
+    const chunk = THREE.ShaderChunk.lights_fragment_begin, at = 'vDirectionalShadowCoord[ i ]';
+    if (chunk.split(at).length !== 2) return; // (three's lighting not as it was written for: the spots keep still)
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <lights_fragment_begin>', chunk.replace(at, `dappled( ${at}, directionalShadowMap[ i ], UNROLLED_LOOP_INDEX )`))
+      .replace('void main() {', `uniform sampler2D uDappleMask;
+uniform vec4 uDappleBox;
+uniform vec2 uDappleUV[ 2 ];
+uniform vec4 uDappleCut[ 2 ];
+varying vec2 vDapXZ;
+${WIND_GLSL}
+float dapNoise( vec2 p ) {
+	vec2 i = floor( p ), f = fract( p );
+	f = f * f * ( 3.0 - 2.0 * f );
+	return mix( mix( windHash( i ), windHash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( windHash( i + vec2( 0.0, 1.0 ) ), windHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
+vec4 dappled( vec4 c, sampler2D map, const in int light ) {
+	if ( light > 1 ) return c; // (the sun's, 0, and the sky's, 1)
+	vec2 leaves = texture2D( uDappleMask, ( vDapXZ - uDappleBox.xy ) * uDappleBox.zw ).rg;
+	float leafy = light == 0 ? leaves.r : leaves.g;
+	if ( leafy < 0.004 ) return c;
+	vec2 uv = uDappleUV[ light ];
+	vec4 cut = uDappleCut[ light ];
+	// what stands in the light's way here and 15 cm round (d: how far up its ray, a share of its map's depth): leaves
+	// high up let the spots move; a thing a metre or two tall (a flamingo, the fence, the shed, the swing, the willow's
+	// lowest shoots) keeps them still (dappleCuts). The grass's own blades, lower, count as neither.
+	float high = 0.0, low = 0.0;
+	for ( int j = 0; j < 5; j ++ ) {
+		vec2 o = vec2( j == 1 ? 1.0 : j == 2 ? -1.0 : 0.0, j == 3 ? 1.0 : j == 4 ? -1.0 : 0.0 ) * 0.15 * uv;
+		float d = c.z - unpackRGBAToDepth( texture2D( map, c.xy + o ) );
+		high = max( high, smoothstep( cut.x, cut.y, d ) );
+		low = max( low, smoothstep( cut.z * 0.8, cut.z, d ) * ( 1.0 - smoothstep( cut.w, cut.w * 1.2, d ) ) );
+	}
+	float k = leafy * high * ( 1.0 - low );
+	if ( k <= 0.0 ) return c;
+	float t = uWindTime, a = dapNoise( vDapXZ * 0.8 ) * 6.2832, b = dapNoise( vDapXZ * 0.8 + 17.3 ) * 6.2832, f = dapNoise( vDapXZ * 2.6 + 5.1 ) * 6.2832;
+	vec2 drift = vec2( sin( t * 0.8 + a ), sin( t * 0.63 + b ) ) * 0.025 + vec2( sin( t * 2.4 + f ), cos( t * 2.0 + f * 1.3 ) ) * 0.005; // (m)
+	c.xy += drift * breeze( vDapXZ ) * k * uv; // (with the leaves: most in a breeze)
+	return c;
+}
+void main() {`);
+  };
+  m.customProgramCacheKey = () => key() + '|dappled';
+  m.needsUpdate = true;
+  return m;
 }
 
 /**
@@ -561,7 +787,7 @@ export function grove(g, ctx, { yard, wire, under = [] }) {
     if (L.curtain) {
       // the willow: its shoots hanging from everything in curtains, longest round the outside, nearly to the ground
       const { cards, place } = willowCurtain(G, L, x, z, GROVE[kind].reach, { yard, wire, trunks, under, kind });
-      g.add(leafCards(cards, T.willowStrandTex(), L.tint, true, r, place, { lift: 0.15, near: [0.3, 0.9] }));
+      g.add(leafCards(cards, T.willowStrandTex(), L.tint, true, r, place, { lift: 0.15, near: [0.3, 0.9], sway: 'hang', amp: 0.06, steady: true, pace: 0.8 })); // (its shoots swing, all the time, a little slower than they first did: user, 2026-11-03)
       trees[kind] = { limbs: G.limbs, leaves: cards, roots: [...buried, ...showingRoots], trunk: { x, z, rings: fillRings(out.profile) } };
     } else {
       // leaves: along the branches and twigs, none low, none in the wire, none through another's trunk
@@ -717,7 +943,7 @@ function spruce(g, ctx, { at: [x, z], reach }, yard, wire, trunks, keepOut = () 
   for (const { pts, rad, level } of limbs) tube(out, pts, rad, level ? 5 : 14, shade, { kind: 'spruce', foot: level ? null : { kind: 'spruce', y0: 0, ph }, collar: level > 0 });
   const buried = roots(out, 'spruce', x, z, 0.31, ph, r2, shade);
   g.add(meshOf(out, barkMat('spruce')));
-  g.add(leafCards(cards, T.leafSprayTex('spruce'), [0.3, 0.25, 0.78], false, r, place));
+  g.add(leafCards(cards, T.leafSprayTex('spruce'), [0.3, 0.25, 0.78], false, r, place, { stiff: 0.45 })); // (needles: stiff)
   ctx.colliders.push({ type: 'seg', ax: x, az: z, bx: x + 0.001, bz: z, r: 0.42, hose: false }); // its trunk
   ctx.colliders.push({ type: 'seg', ax: x, az: z, bx: x + 0.001, bz: z, r: reach * 0.78, base: 0.9 }); // and its skirt, low branches hanging to a metre: no walking in under it
   return { limbs, leaves: cards, roots: buried, trunk: { x, z, rings: fillRings(out.profile) } };
@@ -803,7 +1029,7 @@ export function outsideTrees(g, ctx, { yard, wire, under = [] }) {
     const rb = mulberry32(1963), q = new THREE.Quaternion(), e = new THREE.Euler();
     const place = beards.map(([, , , , yaw]) => q.setFromEuler(e.set(0, yaw, 0)).clone());
     const spots = beards.map(([bx, by, bz, len, , k]) => [bx, by, bz, len, 0, 0, 0, k, 1]);
-    const moss = leafCards(spots, T.hangingMossTex(), [0.17, 0.08, 0.72], true, rb, place, { lift: 0.4, near: [0.2, 0.6] });
+    const moss = leafCards(spots, T.hangingMossTex(), [0.17, 0.08, 0.72], true, rb, place, { lift: 0.4, near: [0.2, 0.6], sway: 'hang', amp: 0.04, pace: 0.75 }); // (in the breezes, slowly)
     moss.castShadow = false; // (wisps: their shadow was a grey smear on the paving)
     g.add(moss);
     trees.beards = beards.length;

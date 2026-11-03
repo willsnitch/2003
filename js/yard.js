@@ -7,10 +7,10 @@ import * as THREE from 'three';
 import * as T from './textures.js';
 import { ROOM } from './room.js';
 import { cyl, deg, mulberry32, fbm, canvasTex } from './util.js';
-import { metric, slab, flat, pierced } from './build.js';
+import { metric, slab, flat, pierced, inPieces } from './build.js';
 import { DAY, AFTERNOON } from './daytime.js';
 import { gardenHose } from './hose.js';
-import { grove, GROVE } from './grove.js';
+import { grove, GROVE, WIND, leafLight, dappled, windy } from './grove.js';
 import { poolGarden, END, POOL, DROWNED } from './pool.js';
 import { takeable } from './props.js';
 import { projectDecal } from './fixtures.js';
@@ -142,6 +142,8 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   for (const [x0, x1, z0, z1] of [[-70, 70, -70, YF.z0], [-70, Y.x0, YF.z0, -t], [-70, Y.x0, -t, 30], [YF.x2, 70, YF.z0, END], [Y.x1, 70, END, -t + PORCH]]) g.add(flat(x0, x1, z0, z1, -0.005, out)); // (the last on along the porch's end to the house)
   longGrass(g, r, ground.map.image);
   const heapAt = leafHeaps(g, mulberry32(313), ground);
+  dappled(ground); // (the sun's spots on it move with the leaves; after the heaps took their copy)
+  underDeck(ground); // (the dark in under the porch)
 
   // ---- the sky, and the far trees along the bottom of it; lit by nothing, brighter seen from indoors
   const skyMat = new THREE.MeshBasicMaterial({ map: T.skyTex(DAY.dome), side: THREE.BackSide, fog: false, depthWrite: false });
@@ -266,6 +268,9 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   const wood = grove(g, ctx, { yard: Y, wire, under });
   // ---- past the wood: the old paving, the iron table, the pool, the angel, the corner trees (pool.js)
   const past = poolGarden(g, M, ctx, { yard: YF, wire: lines, lit: bothFacesLit, merge: mergeAll });
+  // where the sun comes through the leaves onto the lawn, for its spots to move with them (grove.js dappled)
+  WIND.ground.value = OY;
+  leafLight(g, { x0: Y.x0, x1: Y.x1, z0: Y.z0, z1: Y.z1 }, [DAY.sun.dir, DAY.sky.dir], { x: 0, z: OZ });
   drownedFlamingo(g, M, DROWNED.x, POOL.water, DROWNED.z);
   FLAMINGOS.forEach(([x, z, turn, roll, pitch, seed]) => {
     // in your way, the hose's and the water's (user, 2026-10-18: "the water goes through the flamingos"): its body,
@@ -365,6 +370,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
       swing.sway(time, dt);
       play.update(dt);
       hose?.update(dt, time);
+      past.update(dt);
     },
   };
 }
@@ -439,7 +445,7 @@ function leafHeaps(g, r, groundMat) {
   mg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   mg.setIndex(idx);
   mg.computeVertexNormals();
-  const moundMat = groundMat.clone();
+  const moundMat = dappled(groundMat.clone());
   moundMat.shadowSide = THREE.DoubleSide; // (an open sheet: it still throws its shadow)
   const mounds = new THREE.Mesh(mg, moundMat);
   mounds.receiveShadow = mounds.castShadow = true; // (the low sun throws a heap's shadow: it reads as a heap)
@@ -542,7 +548,7 @@ function longGrass(g, r, lawnPicture) {
         if (r() < 0.5) continue;
         if (Math.min(px - Y.x0, Y.x1 - px, pz - Y.z0) > 0.45) tall = Math.min(tall, 0.09);
       }
-      spots.push([px, pz, tall, wood]);
+      spots.push([px, pz, tall, wood, mown, long, fine]);
     }
   }
   // (2026-10-29: the far fence gone from the wood's end — the tall tufts the mower couldn't reach along it short now,
@@ -560,6 +566,36 @@ function longGrass(g, r, lawnPicture) {
     if (rc() < 0.25) continue; // (not a hedge of it: gaps)
     spots.push([x, z, (0.12 + rc() * 0.2) * (along > 0.85 && side >= 0.36 ? 1.25 : 1), 0]); // (longest where the cheeks meet the wall)
   }
+  // the porch (user, 2026-11-03: "the grass mustn't stop where the porch starts, you can see the line where it ends"):
+  // along its skirt the mower can't get in close, so it is long there, as by the fence; and it grows on in under it,
+  // thinner and leggier the further in, out of the light, gone by 40 cm or so (the dark under it begins at 45: porch()).
+  // Worked out after the dice, with its own, so nothing else moves
+  const ss = THREE.MathUtils.smoothstep, rp = mulberry32(2237), pzf = -t, pzb = -t + PORCH;
+  for (const sp of spots) {
+    const [px, pz, , wood, mown, long, fine] = sp;
+    if (px > Y.x0 && px < PX1 && pz > pzf && pz < pzb) { // under it
+      const d = Math.min(pz - pzf, PX1 - px);
+      sp[2] = d > 0.42 || rp() > 1 - 0.85 * ss(d, 0.06, 0.42) ? 0 : (0.12 + rp() * 0.16) * (1 - 0.55 * ss(d, 0.05, 0.4));
+      continue;
+    }
+    if (mown === undefined) continue;
+    const off = Math.hypot(Math.max(Y.x0 - px, 0, px - PX1), Math.max(pzf - pz, 0, pz - pzb));
+    if (off < 0.6) sp[2] = Math.max(sp[2], (mown + (long - mown) * (1 - ss(off + (fine - 0.5) * 0.2, 0.18, 0.6))) * (1 - wood * 0.6));
+  }
+  // and on past the fence a little (user, 2026-11-03: "on a little way outside, fading"): the long grass along it, under
+  // it and out the other side, thinning out over 30–40 cm; its own dice. (Each no wider than reaches 4 cm back through
+  // the boards: grass at their foot, not through them.)
+  const old = spots.length, rf = mulberry32(2239);
+  for (const [xf, side, za, zb] of [[Y.x0, -1, Y.z0, -t], [Y.x1, 1, Y.z0, Y.z1]]) {
+    for (let z = za + 0.04; z < zb - 0.04; z += 0.085) {
+      for (let d = 0.045; d < 0.42; d += 0.08) {
+        const dd = d + rf() * 0.06, px = xf + side * dd, pz = z + (rf() - 0.5) * 0.08;
+        const wood = woodland(xf - side * 0.1, pz), clump = fbm(px * 2.3 + 11, pz * 2.3 + 5, 0.5, 2);
+        if (rf() > (wood > 0.3 ? 0.04 : 0.85) * (1 - ss(dd, 0.08, 0.4)) * (0.4 + clump * 1.2)) continue;
+        spots.push([px, pz, (0.13 + rf() * 0.12) * (1.7 + rf() * 0.6) * (1 - 0.4 * ss(dd, 0.1, 0.4)) * (wood > 0.3 ? 0.6 : 1), wood, undefined, undefined, undefined, (dd + 0.04) / 0.16]);
+      }
+    }
+  }
   // one tuft: three cards crossed, lit as if they were the ground
   const card = new THREE.PlaneGeometry(0.32, 1);
   card.translate(0, 0.5, 0);
@@ -567,7 +603,7 @@ function longGrass(g, r, lawnPicture) {
   const geo = mergeAll(parts);
   const n = geo.attributes.normal;
   for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
-  const tuftMat = bothFacesLit(std({ map: T.grassTuftTex(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 'tufts');
+  const tuftMat = underDeck(bothFacesLit(std({ map: T.grassTuftTex(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 'tufts'));
   const tufts = new THREE.InstancedMesh(geo, tuftMat, spots.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color();
   // each tuft the colour of the ground it stands in (the lawn's picture, there): it grows out of it, so it
@@ -584,18 +620,76 @@ function longGrass(g, r, lawnPicture) {
     return c.setRGB(rr / n / 255, gg / n / 255, bb / n / 255, THREE.SRGBColorSpace);
   };
   const green = new THREE.Color().setRGB(92 / 255, 104 / 255, 48 / 255, THREE.SRGBColorSpace); // the lawn's, gone a little yellow: the tufts among the leaves are still green, in the shade
-  spots.forEach(([x, z, tall, wood], i) => {
-    e.set((r() - 0.5) * 0.25, r() * Math.PI, (r() - 0.5) * 0.25);
+  spots.forEach(([x, z, tall, wood, , , , cap], i) => {
+    const d = i < old ? r : rf; // (the ones past the fence on their own dice: what comes after in the yard stays as it was)
+    e.set((d() - 0.5) * 0.25, d() * Math.PI, (d() - 0.5) * 0.25);
     q.setFromEuler(e);
-    const wide = Math.min(1.5, Math.max(0.4, tall * 3.2)) * (0.7 + r() * 0.5); // a short tuft is a narrow one: its blades not squashed
-    m.compose(p.set(x, 0, z), q, onCellar(x, z) ? s.set(0, 0, 0) : s.set(wide, tall, wide));
+    const wide = Math.min(cap ?? Infinity, Math.min(1.5, Math.max(0.4, tall * 3.2)) * (0.7 + d() * 0.5)); // a short tuft is a narrow one: its blades not squashed
+    m.compose(p.set(x, 0, z), q, onCellar(x, z) || tall <= 0 ? s.set(0, 0, 0) : s.set(wide, tall, wide));
     tufts.setMatrixAt(i, m);
     under(x, z).lerp(green, Math.min(0.8, wood * 1.2));
-    const k = 1.08 + (r() - 0.5) * 0.14;
+    const k = 1.08 + (d() - 0.5) * 0.14;
     tufts.setColorAt(i, c.setRGB(Math.min(1.4, (c.r / tuft.r) * k), Math.min(1.4, (c.g / tuft.g) * k), Math.min(1.4, (c.b / tuft.b) * k)));
   });
   tufts.receiveShadow = true;
   g.add(tufts);
+  // a few weeds in among the longest of it, the pool's (user, 2026-11-03: "few, just to carry it on"): by the fence, the
+  // shed, the trunks, the porch; each the colour of the lawn where it stands, as the tufts are; their own dice
+  const rw = mulberry32(2243), longest = spots.filter(([x, z, h, wood]) => h > 0.3 && wood < 0.3 && x > Y.x0 && x < Y.x1 && !(x < PX1 && z > -t));
+  const kinds = [T.weedTex(0, 1), T.weedTex(0, 2), T.weedTex(1, 1)], lists = kinds.map(() => []);
+  const placed = [];
+  for (let tries = 0; tries < 400 && placed.length < 14 && longest.length; tries++) { // (fourteen, spread out: where the long grass clusters they had crowded)
+    const [x, z] = longest[Math.floor(rw() * longest.length)];
+    if (placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 0.9)) continue;
+    placed.push([x, z]);
+    const k = Math.floor(rw() * 3), big = k < 2, h = (0.28 + rw() * 0.26) * (big ? 1 : 0.8);
+    lists[k].push([x + (rw() - 0.5) * 0.06, z + (rw() - 0.5) * 0.06, h, h * (big ? 1 : 0.6) * (0.85 + rw() * 0.3), rw() * Math.PI * 2]);
+  }
+  const leaf = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0), cross = mergeAll([leaf.clone(), leaf.clone().rotateY(Math.PI / 2)]);
+  for (let i = 0, nn = cross.attributes.normal; i < nn.count; i++) nn.setXYZ(i, 0, 1, 0);
+  lists.forEach((list, k) => {
+    if (!list.length) return;
+    const weeds = new THREE.InstancedMesh(cross, underDeck(bothFacesLit(std({ map: kinds[k], alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 'weeds')), list.length);
+    list.forEach(([x, z, h, w, yaw], i) => {
+      m.compose(p.set(x, -0.01, z), q.setFromEuler(e.set((rw() - 0.5) * 0.15, yaw, (rw() - 0.5) * 0.15)), s.set(w, h, w));
+      weeds.setMatrixAt(i, m);
+      under(x, z);
+      const v = 0.95 + rw() * 0.15, warm = 1 + (rw() - 0.5) * 0.1;
+      weeds.setColorAt(i, c.setRGB(Math.min(1.4, (c.r / tuft.r) * v * warm), Math.min(1.4, (c.g / tuft.g) * v), Math.min(1.4, (c.b / tuft.b) * v / warm)));
+    });
+    weeds.receiveShadow = weeds.castShadow = true;
+    g.add(weeds);
+  });
+}
+
+/**
+ * Under the porch's deck, in behind its skirt, hardly any light (user, 2026-11-03: the grass going on in under it): the
+ * light from all round falls away the further in a thing is, to next to none where the dark under it begins; a little
+ * less already just in front of the skirt, at its foot. (The sun's light there is its shadow's business.)
+ */
+function underDeck(mat) {
+  const before = mat.onBeforeCompile, key = mat.customProgramCacheKey.bind(mat), box = { value: new THREE.Vector4(Y.x0, -t + OZ, PX1, -t + PORCH + OZ) }; // (where it stands: x from, z of its front, x to, z of the house wall)
+  mat.onBeforeCompile = (sh, rr) => {
+    before.call(mat, sh, rr);
+    sh.uniforms.uDeck = box;
+    sh.vertexShader = 'centroid varying vec3 vDeckW;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      {
+        vec4 dw = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          dw = instanceMatrix * dw;
+        #endif
+        vDeckW = (modelMatrix * dw).xyz;
+      }`);
+    sh.fragmentShader = 'uniform vec4 uDeck;\ncentroid varying vec3 vDeckW;\n' + sh.fragmentShader.replace('#include <aomap_fragment>', `#include <aomap_fragment>
+      {
+        float dIn = min(min(vDeckW.x - uDeck.x, uDeck.z - vDeckW.x), min(vDeckW.z - uDeck.y, uDeck.w - vDeckW.z));
+        float k = dIn < 0.012 ? mix(1.0, 0.75, smoothstep(-0.1, 0.012, dIn)) : mix(0.5, 0.04, smoothstep(0.012, 0.42, dIn));
+        reflectedLight.indirectDiffuse *= k;
+        reflectedLight.indirectSpecular *= k;
+      }`);
+  };
+  mat.customProgramCacheKey = () => key() + '|under-deck';
+  return mat;
 }
 
 /**
@@ -781,7 +875,7 @@ function street(g, M, mat, front) {
  */
 function trees(g, r, spots = [[-6.5, -9.9, 9.5], [-0.25, -14.6, 11], [11.2, -9.6, 8.5], [-7.9, -2.4, 9], [6.7, -5.4, 10], [-3.0, -20.0, 12], [12.0, -14.0, 10.5]].map(([x, z, h]) => [x, z < -7.2 ? z + DZ : z, h]), wire = null) {
   const bark = std({ map: T.barkTex(), roughness: 1 });
-  const leafMat = bothFacesLit(std({ map: T.leafClumpTex(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 }), 'far-leaves');
+  const leafMat = windy(bothFacesLit(std({ map: T.leafClumpTex(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 }), 'far-leaves'), { stiff: 0.5 }); // (clumps: big, they move less)
   const cards = [];
   const o = new THREE.Object3D(), tip = new THREE.Vector3();
   const near = (x, y, z, m) => wire && wire.some((w) => Math.hypot(w.x - x, w.y - y, w.z - z) < m + 0.6);
@@ -834,6 +928,7 @@ function trees(g, r, spots = [[-6.5, -9.9, 9.5], [-0.25, -14.6, 11], [11.2, -9.6
     leaves.setColorAt(i, col.setHSL(0.22 + r() * 0.05, 0.35 + r() * 0.15, 0.45 + r() * 0.2));
   });
   leaves.castShadow = leaves.receiveShadow = true;
+  leaves.userData.leaves = true; // (their light on the lawn moves too: grove.js leafLight)
   g.add(leaves);
 }
 
@@ -1009,6 +1104,7 @@ function fence(g, mat, ctx, r0) {
 const TOWER = { x0: -4.92, x1: -4.18, z0: -6.12, z1: -5.38, deck: 1.22, run: 0.44 }; // run: how far out the ladder's foot stands
 const SANDBOX = { x0: -4.65, x1: -2.65, z0: -3.85, z1: -2.15, rim: 0.26, board: 0.045 };
 const SAND = 0.2, PIT_FLOOR = -0.14; // (how deep it can be dug: into a pit under the box, below the lawn)
+const PIECE = 1.2; // the porch's boards, cut into pieces this many metres square for drawing (build.js inPieces)
 /**
  * Pieces of old wood as one mesh (the porch's: user, 2026-10-20 — "holes, bits missing or gouged, scratches, dents,
  * realistic", then "not a uniform pattern"): each [x0, x1, y0, y1, z0, z1, o], the grain along its longest side.
@@ -1254,7 +1350,7 @@ function porch(g, M, mat, ctx) {
   // the second step down on its own, for the knot gone out of it (user, 2026-10-28: "move this hole a bit to the right and
   // make it better" — to the west, as he stood: a dent the dice had made in the middle of it, crumpled; now a knot hole)
   const knotStep = deck.findIndex((p) => p[6].knot), step2 = deck.splice(knotStep, 1);
-  g.add(wornWood(deck, deckMat, r, walked, scuff));
+  g.add(...inPieces(wornWood(deck, deckMat, r, walked, scuff), PIECE)); // (in pieces: drawn only where in view)
   const step2Mesh = wornWood(step2, deckMat, mulberry32(8787), walked, scuff);
   g.add(step2Mesh);
   projectDecal(step2Mesh, { at: [(sx0 + sx1) / 2 - 0.145, zf - 1.5 * RUN - 0.005 + 0.01], size: [0.125, 0.078], map: T.knotHoleTex(), lift: 0.0006, roughness: 0.95 });
@@ -1326,7 +1422,11 @@ function porch(g, M, mat, ctx) {
     base.push([x0 + 0.034, x0 + 0.072, y0, y1, zf + 0.09, zb - 0.01, { k: 0.66, damp: [0, 0.2], round: 0.006, weather: 0.8 }]);
     base.push([x1 - 0.072, x1 - 0.034, y0, y1, zf + 0.09, zb - 0.01, { k: 0.66, damp: [0, 0.2], round: 0.006, weather: 0.8 }]);
   }
-  g.add(Object.assign(slab(x0 + 0.04, x1 - 0.04, 0, top - TH - 0.004, zf + 0.04, zb - 0.01, new THREE.MeshBasicMaterial({ color: 0x0b0907 })), { castShadow: false })); // the dark under it
+  // the dark under it: the lawn goes on in under the skirt a little, fading (user, 2026-11-03: the grass stopped dead at
+  // the skirt, black right behind it), so only from 30 cm up near the skirt, all of it from 45 cm in
+  const darkUnder = new THREE.MeshBasicMaterial({ color: 0x0b0907 });
+  g.add(Object.assign(slab(x0 + 0.04, x1 - 0.04, 0.3, top - TH - 0.004, zf + 0.04, zb - 0.01, darkUnder), { castShadow: false }));
+  g.add(Object.assign(slab(x0 + 0.045, x1 - 0.45, 0, 0.31, zf + 0.45, zb - 0.012, darkUnder), { castShadow: false }));
   // posts, no higher than the rail they carry, and the railing round three sides: a gap at the head of the steps
   // (their edges and the stairs', the handrails', worn round, knocked here and there — user, 2026-10-20)
   const RAIL = 0.9, PS = 0.09, post = (x, z, h) => rest.push([x, x + PS, 0, h, z, z + PS, { damp: [0, 0.3 + r() * 0.15], k: 0.82 + r() * 0.12, round: 0.013 + r() * 0.005, ends: [false, true], chips: 1 + Math.floor(r() * 3) }]);
@@ -1410,8 +1510,8 @@ function porch(g, M, mat, ctx) {
   }
   roughen(base);
   roughen(rest);
-  g.add(wornWood(base, baseMat, mulberry32(8686)));
-  g.add(wornWood(rest, woodMat, r));
+  g.add(...inPieces(wornWood(base, baseMat, mulberry32(8686)), PIECE));
+  g.add(...inPieces(wornWood(rest, woodMat, r), PIECE));
   // the nails' heads, gone dark with rust
   const nailMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.003, 0.0033, 0.003, 7), std({ color: 0x3b332c, metalness: 0.45, roughness: 0.62 }), nails.length), m4 = new THREE.Matrix4(), qn = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   nails.forEach(([p, n], i) => nailMesh.setMatrixAt(i, m4.compose(p, qn.setFromUnitVectors(up, n), one)));

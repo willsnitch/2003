@@ -13,7 +13,8 @@ const between = (a, b) => a + rnd() * (b - a);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const { lerp, clamp } = THREE.MathUtils;
 
-const WALK = 0.5, TROT = 1.15, TURN = 5.5, SWIM = 0.22;
+const WALK = 0.5, TROT = 1.15, RUN = 2.2, TURN = 5.5, SWIM = 0.22;
+const SEEN = new THREE.Vector3();
 const BODY_UP = 0.47; // how far up from her feet she goes, swimming, helmet and all
 export const CLIPS = 24; // planes she can be cut by, in her boat or her diving bubble (boat.js)
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1), DOWN = new THREE.Vector3(0, -1, 0);
@@ -454,6 +455,7 @@ export class Cat {
     this.groom = { on: false, t: 0, side: 1, blend: 0, wait: between(3, 8) };
     this.tailSide = 1;
     this.shy = 0; // seconds before it will bolt from under your feet again
+    this.hurry = null; // { left }: seconds she has to be where she is hurrying to (hurryTo)
     this.queue = [{ type: 'pose', pose: 'sit', dur: between(3, 5), look: 'player' }];
     this.last = '';
     // which room of the house a point is in (null in a doorway, or anywhere she doesn't know); set by
@@ -592,6 +594,58 @@ export class Cat {
     q.push({ type: 'pose', pose: 'sit', dur: between(4, 9), look: 'player', visit: true });
     this.groom.on = false;
     this.queue = q;
+  }
+
+  /**
+   * Straight after you into the room you have gone into, and quickly: down off wherever she is and to (x, z) within
+   * `within` seconds — at a trot, at a run if she must, and while you can't see her as fast as it takes (user,
+   * 2026-11-03: in the bathroom 3 s after you at most, so its door can shut behind the two of you). Then she sits.
+   */
+  hurryTo(x, z, within) {
+    const q = [{ type: 'pose', pose: 'stand', dur: 0.15, look: 'ahead', chase: true }];
+    if (this.perch) {
+      if (this.perch.rest) q.push({ type: 'line', to: this.perch.land, chase: true });
+      q.push(...this.hopDown(this.perch, { chase: true }));
+    }
+    q.push({ type: 'walk', x, z, speed: TROT, chase: true, due: within });
+    q.push({ type: 'face', at: 'player' });
+    q.push({ type: 'pose', pose: 'sit', dur: between(4, 9), look: 'player', visit: true });
+    this.groom.on = false;
+    this.hurry = { left: within };
+    this.queue = q;
+  }
+
+  /** On a hurried way somewhere (hurryTo). */
+  get hurrying() {
+    return this.queue.some((s) => s.due !== undefined);
+  }
+
+  /** Out of your sight: behind a wall, or off the edge of what you see. */
+  get unseen() {
+    if (!this.root.visible) return true;
+    if (!this.camera.isCamera) return false;
+    SEEN.set(this.pos.x, this.groundY + 0.15, this.pos.z).project(this.camera);
+    return SEEN.z > 1 || Math.abs(SEEN.x) > 1.15 || Math.abs(SEEN.y) > 1.15;
+  }
+
+  /** On a hurried walk (`due`): as fast as she needs to be there in time — and, unseen, skipped on along her way. */
+  hasten(s, dt) {
+    const left = Math.max(0.2, this.hurry.left);
+    let d = 0, [px, pz] = [this.pos.x, this.pos.z];
+    for (const [x, z] of s.path) { d += Math.hypot(x - px, z - pz); px = x; pz = z; }
+    const need = d / left;
+    s.speed = clamp(need, TROT, RUN);
+    if (need > RUN && this.unseen) this.skipAlong(s.path, (need - RUN) * dt);
+  }
+
+  /** `d` metres on along her path at once, facing along it. */
+  skipAlong(path, d) {
+    while (d > 0 && path.length > 1) {
+      const [tx, tz] = path[0], dx = tx - this.pos.x, dz = tz - this.pos.z, l = Math.hypot(dx, dz);
+      if (l > 1e-4) this.yaw = Math.atan2(dx, dz);
+      if (l <= d) { this.pos.x = tx; this.pos.z = tz; d -= l; path.shift(); }
+      else { this.pos.x += (dx / l) * d; this.pos.z += (dz / l) * d; d = 0; }
+    }
   }
 
   /**
@@ -1179,6 +1233,7 @@ export class Cat {
     const pl = this.player.pos;
     const s0 = this.queue[0];
     this.shy -= dt;
+    if (this.hurry) this.hurry.left -= dt;
     if (this.shy <= 0 && this.groundY === 0 && this.player.feet < 0.2 && !this.air && s0?.type !== 'jump' && !s0?.hold &&
         Math.hypot(pl.x - this.pos.x, pl.y - this.pos.z) < 0.3) this.bolt();
 
@@ -1209,6 +1264,7 @@ export class Cat {
           this.target = POSES.stand;
           this.lookMode = 'ahead';
         }
+        if (s.due !== undefined) this.hasten(s, dt);
         done = this.followPath(s, dt) || s.t > 14;
         break;
       }

@@ -50,8 +50,8 @@ house: `notes/world.md`. Read only the part you need.
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting restarts after each write: the last was 2026-11-02 (the bath's cycle and his
-    angel, written as 0.5.7); next is round 1. When a round brings a new playable block or
+    round of the 5 it was. Counting restarts after each write: the last was 2026-11-03 (rounds 1–5 of that day, written
+    as 0.5.9, a number proposed to him; 0.5.8, speed and the breeze, also only proposed); next is round 1. When a round brings a new playable block or
     completes a batch, propose the next number and let him decide. Current: **0.5.7** (user, 2026-11-03; 0.5.1–0.5.3: Mum; 0.5.6:
     the end of the garden; 0.5.7: the bath's cycle and the stone angel).
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
@@ -93,7 +93,11 @@ house: `notes/world.md`. Read only the part you need.
   in perspective depth (large `near`, tiny bias); RectAreaLight window panels have no shadows and light through walls
   (cut out of the bathroom in bath.js); unlit (Basic) things like steam are scaled by the room's light. Diagnose by
   switching lights off one at a time (pin `intensity` with a getter: `house.update` resets some each frame) and
-  raycasting the pixel. Don't guess.
+  raycasting the pixel. Don't guess. Lines that come and go as you move, at corners and along edges seen side-on,
+  worse in a small window: the multisampled picture works a surface's point out past its edge (shadow lookups landed
+  outside the walls, in the sun; position boxes like the bath's dim or `corridorFill` read "outside"). Shadow coords
+  are `centroid` (main.js); any new varying position used for a box test or a lookup must be `centroid` too, and a
+  box must reach into the walls as far as the ceilings do (13.5 cm). Reproduce at 760×450, not full size.
 - Window daylight = `RectAreaLight` panels the size of the glass, never a point/spot light near white things.
 - Window glass = two layers (`T.windowDirtTex` dirt, unlit, + an additive black glossy sheen): bedroom in `room.js`
   (moved to `house.scene`), the house's via `glassPane` / `M.pane`. Never `M.glass` on a window. Anything transparent
@@ -120,6 +124,13 @@ house: `notes/world.md`. Read only the part you need.
   `pool.js` (the end of the garden, past the wood), `basement.js`. The angel is his Meshy model, `assets/models/angel.glb`, shrunk once in Blender
   (decimate 30 %, the texture's seams and everything up to the feet locked — unlocked, the plinth's texture warped:
   660k → 198k triangles; colour 8192 → 4096 px, normal 2048, roughness 1024; 80 → 15 MB).
+- The breeze (2026-11-03): `WIND` in grove.js, its time from `house.update`. Leaf cards, the neighbours' crowns and
+  the moss move only in a breeze now and then (`breeze`: ~24 % of the time, ~6 s each, ~20 s apart, slow); the
+  willow's shoots all the time (`windGust`, `steady`; "the only movement I like", slowed a little). In their shaders
+  (`windVertex`); their shadows stay at rest and they are lit as if at rest (no flicker). The light under the crowns
+  moves on the lawn in the breezes (`dappled`, mask from `leafLight`: sun and sky, leaves 3 m+ up only; at 18:00 the
+  sun doesn't reach the lawn: it is the sky's light that moves). New leaves made another way need `windy(mat)` and
+  `userData.leaves = true`. Random numbers in shaders: no `sin` of big numbers (the GPU's differs): `windDice`.
 - Others: `daytime.js`, `textures.js` (all textures, canvas-drawn), `zelpa.js`, `zelpa-hud.js`.
 - **The house is raised** `LIFT` 0.75 over the yard, a porch `PORCH` 1.85 deep along the kitchen's back wall (to
   `PORCH_X1`; cellar doors on the house's wall east of it, hose tap and coil right of the back door). yard.js,
@@ -158,7 +169,9 @@ house: `notes/world.md`. Read only the part you need.
     neither its door nor its window (`OPENINGS`) is in view: anything of the bedroom's scene showing outside its walls
     must lie inside those boxes. The kitchen lamp's shadow is two layers (`layeredShadow`, build.js): only Mum is
     drawn again as she moves; anything else that moves in its reach must `mark()` it. A surface facing away from a
-    light skips that light's shadow lookup (build.js, exact).
+    light skips that light's shadow lookup (build.js, exact). From inside the bedroom, house meshes seen through
+    neither its window nor its door (`GAPS`) are left out of the picture, not the shadows (`hideUnseen`): a new
+    opening in the bedroom goes in `GAPS`. The porch's boards are cut in 1.2 m pieces (`inPieces`).
 
 ## The yard, the end of the garden, the house outside and inside → `notes/world.md`
 
@@ -206,5 +219,8 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - The bath's cycle (2026-11-02), not yet seen by him in play: the lines "It won't turn." / "It won't budge." (mine),
   the water running back up the bath's front and the whirl over the plug (mine), Luna's shake close up, the poof with
   the light off. A 2 cm sliver of tile is left along the bathroom's door wall (only the sides were asked).
+- The breeze (2026-11-03, his second notes: "light, slow, random, now and then; the willow only a little slower"):
+  not yet seen by him in play. Still: the long grass, tufts, weeds and the leaf litter. Mum costs ~5 ms in the
+  kitchen whatever her shader (her geometry, cause not found).
 - Mum's right fist (2026-10-25/27): not yet judged by him, above all the wrist, cocked ~45° towards the little
   finger while she cuts, up to ~60° as she puts the knife down.

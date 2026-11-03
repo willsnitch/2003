@@ -401,8 +401,11 @@ export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   }
   for (let i = 0; i < 26; i++) { const a = rl() * 6.3, d = 0.05 + rl() ** 1.5 * 0.2; leafSpots.push([DROWNED.x + Math.cos(a) * d, POOL.water + 0.0025, DROWNED.z + Math.sin(a) * d, 0.05 + rl() * 0.05, 0]); } // (caught round its neck)
   litterLeaves(g, leafSpots, rl);
+  const fizz = poolBubbles(g, M, ctx.camera, pool.surface);
 
   return {
+    /** Every frame: the bubbles coming up. */
+    update: fizz,
     pool, furniture, angel, trees, stones: stones.length, weeds: weeds.reduce((n, l) => n + l.length, 0), tufts: tufts.length, leaves: leafSpots.length, // (for checking)
     /** What is underfoot out here, for whatever lies on it. */
     groundAt: (x, z) => (z < END && sdPool(x, z) > POOL.cope ? Math.max(0, topAt(x, z)) : 0),
@@ -605,6 +608,171 @@ function settGeo(L, D, seed) {
 }
 
 // ---------------------------------------------------------------- the pool
+
+/** How a bubble shows through the murk: a soft blur, no edge to it (white on black, for an alphaMap). */
+function murkTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(31, 29, 0, 32, 32, 31);
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.3, 'rgba(255,255,255,0.7)');
+  gr.addColorStop(0.65, 'rgba(255,255,255,0.22)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+/**
+ * The water's own movement where a bubble breaks it: rings of ripples running out from there, the first ones finer,
+ * spreading and fading as they go, uneven round (user, 2026-11-03: the drawn rings were "too perfect", it must be the
+ * water moving). In the surface's shader, as the slope they give it, on up to `RIPPLES` places at once. Returns
+ * `start(x, z, amp)` (world x, z; `amp` the ripples' height in metres) and `update(dt)`.
+ */
+const RIPPLES = 8;
+function poolRipples(surface) {
+  const slots = Array.from({ length: RIPPLES }, () => new THREE.Vector4()), U = { value: slots };
+  const m = surface.material, before = m.onBeforeCompile, key = m.customProgramCacheKey.bind(m);
+  m.onBeforeCompile = (sh, r) => {
+    before.call(m, sh, r);
+    sh.uniforms.uRip = U;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRipW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRipW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vRipW;
+        uniform vec4 uRip[${RIPPLES}]; // where (x, z), how long ago (s), how high (m); 0 high: none
+        vec2 ripSlope(vec2 p) {
+          vec2 s = vec2(0.0);
+          for (int i = 0; i < ${RIPPLES}; i++) {
+            vec4 R = uRip[i];
+            if (R.w <= 0.0) continue;
+            vec2 d = p - R.xy;
+            float r = length(d), age = R.z, seed = fract(R.x * 7.13 + R.y * 3.71), th = atan(d.y, d.x);
+            float lam = 0.034 + 0.024 * age, k = 6.2832 / lam, w = 0.028 + 0.065 * age;
+            float front = 0.22 * age * (1.0 + 0.08 * sin(2.0 * th + seed * 6.2832) * sin(3.0 * th + seed * 4.0)); // (not quite round: the duckweed holds it back here and there)
+            float u = r - front + 0.45 * w, e = exp(-u * u / (w * w)), de = -2.0 * u / (w * w) * e;
+            float a = R.w * exp(-0.9 * age) / sqrt(1.0 + r / 0.08);
+            a *= 0.6 + 0.4 * sin(3.0 * th + seed * 6.2832) * sin(5.0 * th + seed * 11.0);
+            a *= smoothstep(2.0, 4.5, lam / max(fwidth(r), 1e-5)); // (how much of it, out from its middle, one pixel takes in: rings finer than a few pixels smoothed out, not a shimmer — seen at a slant, only where they run across your view)
+            float ph = k * (r - front);
+            s += a * (de * sin(ph) + e * k * cos(ph)) * smoothstep(0.0, 0.012, r) * d / max(r, 1e-4);
+          }
+          return s;
+        }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec2 rs = ripSlope(vRipW.xz);
+          normal = normalize((viewMatrix * vec4(normalize(vec3(-rs.x, 1.0, -rs.y)), 0.0)).xyz);
+        }`);
+  };
+  m.customProgramCacheKey = () => key() + '|pool-ripples';
+  m.needsUpdate = true;
+  const ages = new Float32Array(RIPPLES);
+  return {
+    start(x, z, amp) {
+      let i = slots.findIndex((s) => s.w <= 0);
+      if (i < 0) i = ages.indexOf(Math.max(...ages)); // (all going: the oldest makes way)
+      slots[i].set(x, z, 0, amp);
+      ages[i] = 0;
+    },
+    update(dt) {
+      for (let i = 0; i < RIPPLES; i++) {
+        if (slots[i].w <= 0) continue;
+        slots[i].z = ages[i] += dt;
+        if (ages[i] > 3) slots[i].w = 0;
+      }
+    },
+  };
+}
+
+/**
+ * Now and then a few small bubbles come up through the water, slowly, from the same few places on its bottom — one
+ * beside the drowned flamingo — sit a moment on the surface, and burst, the water rippling out from where each was
+ * (user, 2026-11-03). Each its own size, how long it takes to come up, how long it sits. The water is near black: each
+ * is seen only its last 10–18 cm up, a soft pale green out of the murk and clearer as it comes (a flat picture on the
+ * surface where your eye sees it through it: the surface hides whatever is under it), then a glossy bead on the top,
+ * light green like the water it is made of, the sky in it, each a little out of round; it nudges the water as it comes
+ * up through it, and the water runs out in rings as it bursts. (At first only the bead, 6–16 mm across and rarer: "I
+ * waited a minute and nothing"; then white, with a drawn ring: "horrible… light green, in keeping with the pool" —
+ * user, 2026-11-03.) Returns `update(dt)`.
+ */
+function poolBubbles(g, M, camera, surface) {
+  const SOURCES = [[DROWNED.x + 0.22, DROWNED.z + 0.12], [1.2, -18.2], [2.0, -17.4], [3.4, -19.7], [4.6, -18.9], [5.7, -17.2]].filter(([x, z]) => sdPool(x, z) < -0.35);
+  const set = new THREE.Group();
+  set.userData.live = true; // (they move: kept out of the bake)
+  g.add(set);
+  const water = poolRipples(surface);
+  // the bead: a skin of the pool's water, light green (darker again: user, 2026-11-03), glossy, the sky in it tinted by it
+  // (part metal: what a plastic-like gloss reflects stays the sky's colour, and that was white)
+  const skin = std({ color: 0x5c8240, roughness: 0.14, metalness: 0.6, envMap: M.yardEnv, envMapIntensity: 0.8, transparent: true, depthWrite: false });
+  // and a film, not a bead of glass: the water dark through its middle, fuller towards its rim (whole, it read as a pea)
+  skin.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
+      gl_FragColor.a *= mix(0.3, 1.0, pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 1.6));`);
+  };
+  skin.customProgramCacheKey = () => 'pool-bubble-film';
+  const dome = new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.62); // (only what stands out of the water)
+  const flat = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), soft = murkTex();
+  const live = Array.from({ length: 16 }, () => {
+    const b = new THREE.Mesh(dome, skin);
+    const seen = new THREE.Mesh(flat, std({ color: 0x6f8a52, alphaMap: soft, roughness: 0.9, transparent: true, depthWrite: false, opacity: 0 }));
+    b.receiveShadow = seen.receiveShadow = true;
+    b.visible = seen.visible = false;
+    set.add(b, seen);
+    return { b, seen, t: -1, r: 0, deep: 0, rise: 0, up: 0, sit: 0, x: 0, z: 0, sx: 1, sz: 1, sy: 1, turn: 0, aspect: 1, broke: false };
+  });
+  const eye = new THREE.Vector3(), at = new THREE.Vector3(), hit = new THREE.Vector3(), w = new THREE.Vector3();
+  const ripple = (q, amp) => { g.localToWorld(w.set(q.x, POOL.water, q.z)); water.start(w.x, w.z, amp); };
+  let next = 1.5 + Math.random() * 2.5, src = null, left = 0, gap = 0;
+  const update = (dt) => {
+    if (!src && (next -= dt) <= 0) { src = SOURCES[Math.floor(Math.random() * SOURCES.length)]; left = 4 + Math.floor(Math.random() * 5); gap = 0; }
+    if (src && (gap -= dt) <= 0) {
+      const q = live.find((k) => k.t < 0);
+      // (on the top only a moment, most of them, then gone: sitting there up to 3 s, the last of one lot was still there as
+      // the next came up somewhere else, and seemed to wait for it — user, 2026-11-03)
+      if (q) {
+        Object.assign(q, { t: 0, r: 0.01 + Math.random() * 0.01, deep: 0.12 + Math.random() * 0.1, rise: 2.5 + Math.random() * 2, up: 0.4 + Math.random() * 0.3, sit: Math.random() < 0.15 ? 1.2 + Math.random() * 0.8 : 0.15 + Math.random() * 0.7, x: src[0] + (Math.random() - 0.5) * 0.12, z: src[1] + (Math.random() - 0.5) * 0.12, broke: false });
+        // each out of round its own way, and its blur under the water too
+        Object.assign(q, { sx: 0.9 + Math.random() * 0.2, sz: 0.9 + Math.random() * 0.2, sy: 0.7 + Math.random() * 0.2, turn: Math.random() * Math.PI, aspect: 0.85 + Math.random() * 0.3 });
+      }
+      gap = 0.2 + Math.random() * 0.6;
+      if (--left <= 0) { src = null; next = 2 + Math.random() * 5; }
+    }
+    water.update(dt);
+    g.worldToLocal(camera.getWorldPosition(eye));
+    for (const q of live) {
+      if (q.t < 0) continue;
+      q.t += dt;
+      if (q.t < q.rise) { // coming up through the murk: where your eye meets the surface on its way to it
+        const f = q.t / q.rise, d = q.deep * (1 - f * (2 - f)); // (slowing as it nears the top)
+        at.set(q.x + Math.sin(q.t * 1.7) * 0.002, POOL.water - d - q.r, q.z);
+        const k = (eye.y - POOL.water - 0.0012) / (eye.y - at.y);
+        hit.copy(at).sub(eye).multiplyScalar(k).add(eye);
+        const el = Math.max(0.15, (eye.y - POOL.water) / Math.max(0.01, eye.distanceTo(hit))); // (how steeply you look down at it)
+        q.seen.position.copy(hit);
+        q.seen.rotation.y = Math.atan2(hit.x - eye.x, hit.z - eye.z);
+        q.seen.scale.set(5 * q.r * k * q.aspect, 1, (5 * q.r * k) / el);
+        q.seen.material.opacity = 0.6 * f ** 1.3;
+        q.seen.visible = true;
+      } else {
+        q.seen.visible = false;
+        if (!q.broke) { q.broke = true; ripple(q, 0.0012 * (q.r / 0.015)); } // (it pushes the water up as it comes through)
+        const e = Math.min(1, (q.t - q.rise) / q.up), up = e * e * (3 - 2 * e); // (then slowly up out of the water)
+        const sway = 1 + 0.04 * Math.sin(q.t * 9 + q.turn);
+        q.b.visible = true;
+        q.b.scale.set(q.r * q.sx * sway, q.r * q.sy * (0.35 + 0.65 * up), q.r * q.sz / sway);
+        q.b.rotation.y = q.turn;
+        q.b.position.set(q.x + Math.sin(q.t * 1.7) * 0.002, POOL.water - q.r * q.sy * 0.25 * (1 - up), q.z);
+        if (q.t > q.rise + q.up + q.sit) { q.t = -1; q.b.visible = false; ripple(q, 0.004 * (q.r / 0.015)); }
+      }
+    }
+  };
+  return Object.assign(update, { live, water }); // (for checking)
+}
 
 /**
  * The pool: its walls (render and a band of tiles, `poolWallTex`), the coping round it (bull-nosed stone, piece by

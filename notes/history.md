@@ -277,6 +277,27 @@ and the current state; `notes/world.md` the approved state of the yard and the h
   imported again from the console is the game's own instance; never add a HemisphereLight to `house.scene` in a
   test render (the baked house goes black).
 
+## Speed and the breeze (2026-11-02 → 03)
+
+- He asked for "lighter, where possible, without losing quality or details": every change was checked against the
+  old picture pixel by pixel (mean 0.01/255) and measured old against new **in the same page, switched back and forth**
+  — the M2 heats up and before/after runs drift 30 %; a `readPixels` sync doesn't wait for the GPU here. In the real
+  loop the GPU was the limit, and mostly by geometry: from the bedroom, 3.3 M triangles of yard and house behind the
+  walls (porch 1.2 M, trees 1 M). Fixed, all with the same picture: the multisampled picture resolved once instead of
+  three times with depth (`sharedPicture`); the kitchen lamp's cube shadow, redrawn whole every frame Mum moved
+  (6.6 M triangles), now two layers (`layeredShadow`); the bedroom pass left out when unseen; from inside the bedroom,
+  what can't be seen through its window or door left out of the house's picture, not its shadows (`hideUnseen`);
+  shadow lookups skipped on surfaces facing away from a light. The porch in pieces (`inPieces`) alone gave 1–2 fps.
+- The breeze: first a steady wind on everything; he liked only the willow ("the only movement I like, a little
+  slower") and wanted the rest "light, slow and random, not too repeated, as if a breeze moved the leaves now and
+  then, not all the time". So a `breeze` that is zero most of the time, from value noise (no beat), crossing the
+  garden. Leaves move only where they are seen; their shadow lookups use where they hang at rest, or they flicker in
+  their own shadows. His "shimmer on the lawn": at 18:00 the sun lights only the crowns' tops (checked with the sun
+  alone switched off), so what moves is the sky light's spots under the crowns (`dappled`), and only where leaves 3 m+
+  up are what's in the way (not a fence's or the shed's shadow, nor the grass's own).
+- Lesson: a `sin`-based hash of large numbers differs between the GPU and JS — a test picking "a gusty moment" in JS
+  found the trees still. Use an arithmetic hash (`windDice`).
+
 ## Testing
 
 - The Browser pane forwards his real input: set `GAME.player.setPose(...)` before measuring; aim rays at object
