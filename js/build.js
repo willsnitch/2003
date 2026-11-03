@@ -108,6 +108,64 @@ export function shadowOnly(mesh, lights) {
 }
 
 /**
+ * The shadow of `light` (in `scene`) in two layers: what stands still, drawn only when something has
+ * moved that marks it (`light.userData.stale`: how many more times) and kept, and on it, whenever the
+ * shadow is wanted, only what `movers()` gives (roots of what goes about by itself: Mum). The same map
+ * for a fraction of the work: the kitchen lamp's, drawn again every frame while she walked, drew the
+ * whole house and the porch six times over, 6.6 million triangles, for her alone.
+ */
+export function layeredShadow(renderer, scene, light, movers) {
+  const gl = renderer.getContext(), sm = renderer.shadowMap, draw = sm.render;
+  let kept = null; // the still layer, as last drawn
+  light.userData.stale = 1;
+  const copy = (from, to) => {
+    renderer.state.setScissorTest(false);
+    renderer.state.buffers.depth.setMask(true);
+    renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, renderer.properties.get(from).__webglFramebuffer);
+    renderer.state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, renderer.properties.get(to).__webglFramebuffer);
+    gl.blitFramebuffer(0, 0, from.width, from.height, 0, 0, to.width, to.height, gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+    renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    renderer.state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  };
+  const shown = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  const once = (lights, root, camera) => {
+    sm.needsUpdate = true;
+    light.shadow.needsUpdate = true;
+    draw.call(sm, lights, root, camera);
+  };
+  sm.render = function (lights, root, camera) {
+    if (root !== scene || !this.needsUpdate || !light.shadow.needsUpdate || !lights.includes(light)) return draw.call(this, lights, root, camera);
+    const target = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
+    draw.call(this, lights.filter((l) => l !== light), root, camera); // the other lamps as ever
+    const who = movers().filter(shown);
+    if (light.userData.stale > 0 || !kept) {
+      // what stands still, without them, kept
+      const off = [];
+      for (const m of who) m.traverse((o) => { if (o.castShadow) { o.castShadow = false; off.push(o); } });
+      once([light], root, camera);
+      for (const o of off) o.castShadow = true;
+      if (!kept) {
+        kept = light.shadow.map.clone();
+        renderer.initRenderTarget(kept);
+      }
+      copy(light.shadow.map, kept);
+      light.userData.stale = Math.max(0, light.userData.stale - 1);
+    } else copy(kept, light.shadow.map);
+    // and on it, each of them where they are now (not cleared first: drawn over what was kept)
+    const clear = renderer.clear;
+    renderer.clear = () => {};
+    try {
+      for (const m of who) once([light], m, camera);
+    } finally {
+      renderer.clear = clear;
+    }
+    light.shadow.needsUpdate = false;
+    this.needsUpdate = false;
+    renderer.setRenderTarget(target, face, level); // (the copies leave no framebuffer bound)
+  };
+}
+
+/**
  * Everything under `root` that never moves, merged into one mesh per material (and per way it
  * takes shadow), so the house costs a few dozen draws instead of a thousand. Left alone: anything
  * that can be used or that moves (an `interact` or `live` on it or above it), instanced meshes,
@@ -246,6 +304,20 @@ export function outdoorsOnly(root, rooms) {
   let n = 0;
   for (const [m, indoors] of seenIndoors) if (!indoors && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) { outdoorLit(m); n++; }
   return n;
+}
+
+// A surface turned away from a light gets none of it (its share goes with the cosine, and stops at 0), so the light's
+// shadow need not be looked up there: indoors, five lamps' shadows, up to a hundred texture reads a pixel, read for
+// nothing. The same picture. (Clearcoat, with a normal of its own, and toon shading, which lights the far side, keep
+// theirs; a cut-out lit on both faces turns its normal before this, so it goes by the normal it is lit by.)
+{
+  const facing = `
+		#if !defined( USE_CLEARCOAT ) && !defined( TOON )
+		directLight.visible = directLight.visible && dot( geometryNormal, directLight.direction ) > 0.0;
+		#endif`;
+  const calls = ['getPointLightInfo( pointLight, geometryPosition, directLight );', 'getSpotLightInfo( spotLight, geometryPosition, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );'];
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  if (calls.every((c) => chunk.split(c).length === 2)) THREE.ShaderChunk.lights_fragment_begin = calls.reduce((s, c) => s.replace(c, c + facing), chunk);
 }
 
 /**

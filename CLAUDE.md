@@ -51,9 +51,9 @@ house: `notes/world.md`. Read only the part you need.
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
     round of the 5 it was. Counting restarts after each write: the last was 2026-11-02 (the bath's cycle and his
-    angel, written as 0.5.7, a number proposed to him); next is round 1. When a round brings a new playable block or
-    completes a batch, propose the next number and let him decide. Current: **0.5.6** (0.5.1–0.5.3: Mum; 0.5.6: the
-    end of the garden; 0.5.7 proposed).
+    angel, written as 0.5.7); next is round 1. When a round brings a new playable block or
+    completes a batch, propose the next number and let him decide. Current: **0.5.7** (user, 2026-11-03; 0.5.1–0.5.3: Mum; 0.5.6:
+    the end of the garden; 0.5.7: the bath's cycle and the stone angel).
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
 
@@ -153,6 +153,12 @@ house: `notes/world.md`. Read only the part you need.
   - Under the floor (`basement.js`): Luna's `Nav` skips colliders with top ≤ 0.03; whatever the house scene has below
     the floor shows inside the basement (`cellar.passes`), so it keeps out of `UNDER`. basement.js burns 2711 draws of
     its shared RNG where the wooden doors were: anything new before the steps uses its own RNG, or the basement moves.
+  - Drawing (2026-11-03, for speed, same picture): the scenes go into one multisampled picture resolved once
+    (`sharedPicture`, main.js); the grade pass tone-maps itself (no OutputPass). The bedroom's pass is left out when
+    neither its door nor its window (`OPENINGS`) is in view: anything of the bedroom's scene showing outside its walls
+    must lie inside those boxes. The kitchen lamp's shadow is two layers (`layeredShadow`, build.js): only Mum is
+    drawn again as she moves; anything else that moves in its reach must `mark()` it. A surface facing away from a
+    light skips that light's shadow lookup (build.js, exact).
 
 ## The yard, the end of the garden, the house outside and inside → `notes/world.md`
 
@@ -177,6 +183,9 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - A `javascript_tool` call that steps more than ~120 rendered frames of the house can time out halfway: step in
   chunks, keep results in `window`.
 - Edit with exact, unique markers; when splicing with a script, search the end marker *after* the start.
+- Speed: measure in the real loop with the pane shown, switching old/new in the same page a second or two at a time,
+  several rounds (the M2 heats up: fps drift 30 % over minutes, so before/after runs lie). A `readPixels` sync does
+  not reliably wait for the GPU here. In the bedroom the GPU is bound by the yard's geometry (porch, trees, grass).
 
 ## Open items (waiting on him)
 

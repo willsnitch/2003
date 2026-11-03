@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ROOM, makeMaterials, buildShell, buildWindow, buildDoor, buildLights, buildEnvironment } from './room.js';
 import { buildProps } from './props.js';
 import { Player } from './player.js';
@@ -170,35 +169,87 @@ const GradeShader = {
       float n = hash(vUv * 913.0 + fract(uTime) * 61.0) - 0.5;
       c.rgb += n * uGrain * (0.25 + c.rgb);
       gl_FragColor = vec4(max(c.rgb, 0.0), c.a);
+      // and straight onto the screen: tone mapped and into sRGB as OutputPass did, one full-screen pass fewer
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }`,
 };
 
-const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
-const composer = new EffectComposer(renderer, target);
+/**
+ * The picture the scenes are drawn into: multisampled, half-float, with its depth. Three resolves a multisampled
+ * target after every render into it — three times a frame here, colour and depth, every sample written out and read
+ * back in for the next scene — so this one is three's in name only (`setRenderTargetFramebuffer`) and is resolved by
+ * hand, once, colour only, when every scene is in; its samples are then let go of, never written out.
+ */
+function sharedPicture() {
+  const gl = renderer.getContext(), state = renderer.state, samples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES));
+  const fb = gl.createFramebuffer(), color = gl.createRenderbuffer(), depth = gl.createRenderbuffer();
+  const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+  renderer.setRenderTargetFramebuffer(rt, fb);
+  return {
+    rt,
+    setSize(w, h) {
+      w = Math.floor(w);
+      h = Math.floor(h);
+      for (const [rb, format] of [[color, gl.RGBA16F], [depth, gl.DEPTH_COMPONENT24]]) {
+        gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, format, w, h);
+      }
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+      state.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, color);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+      state.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // (its size set by hand: setSize would dispose of it, and of the framebuffer with it)
+      rt.width = w;
+      rt.height = h;
+      rt.viewport.set(0, 0, w, h);
+      rt.scissor.set(0, 0, w, h);
+    },
+    resolve(into) {
+      renderer.setRenderTarget(into); // (three makes its framebuffer the first time)
+      state.setScissorTest(false);
+      state.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+      state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, renderer.properties.get(into).__webglFramebuffer);
+      gl.blitFramebuffer(0, 0, rt.width, rt.height, 0, 0, rt.width, rt.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0, gl.DEPTH_ATTACHMENT]);
+      state.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    },
+  };
+}
+const picture = sharedPicture();
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, depthBuffer: false }));
 // The bedroom is drawn first, then the rest of the house and the yard into the same picture and
 // against the same depth, so each shows only where nothing of the other stands in front of it.
 // Each scene has its own lamps and its own shadow maps, redrawn when its own things move.
-class ScenePass extends RenderPass {
-  constructor(scene, camera, shadowsDue) {
-    super(scene, camera);
-    this.shadowsDue = shadowsDue;
-  }
-  render(renderer, ...rest) {
-    renderer.shadowMap.needsUpdate = this.shadowsDue();
-    super.render(renderer, ...rest);
-  }
-}
 let roomShadowsDue = true;
-const roomPass = new ScenePass(scene, camera, () => roomShadowsDue);
-composer.addPass(roomPass);
-const housePass = new ScenePass(house.scene, camera, () => house.shadowsDue());
-housePass.clear = false;
-composer.addPass(housePass);
+const roomPass = { scene, shadowsDue: () => roomShadowsDue, enabled: true };
+const housePass = { scene: house.scene, shadowsDue: () => house.shadowsDue(), enabled: true };
 // and under the house, the basement (basement.js): drawn only when it can be seen; from down there the house and the
 // bedroom only when the cellar's open doors are in view
-const cellarPass = new ScenePass(house.cellar.scene, camera, () => house.cellar.shadowsDue());
-cellarPass.clear = false;
-composer.addPass(cellarPass);
+const cellarPass = { scene: house.cellar.scene, shadowsDue: () => house.cellar.shadowsDue(), enabled: true };
+class ScenesPass extends Pass {
+  constructor(list) {
+    super();
+    this.list = list;
+    this.needsSwap = false;
+  }
+  render(renderer, writeBuffer, readBuffer) {
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(picture.rt);
+    renderer.clear();
+    for (const p of this.list) {
+      if (!p.enabled) continue;
+      renderer.shadowMap.needsUpdate = p.shadowsDue();
+      renderer.render(p.scene, camera);
+    }
+    picture.resolve(readBuffer);
+    renderer.autoClear = autoClear;
+  }
+}
+composer.addPass(new ScenesPass([roomPass, housePass, cellarPass]));
 // No bloom (user, 2026-10-14): it put a halo round everything bright — sunlit sheets, plates, even
 // Luna's eyes. The pass stays in place, switched off, in case it is ever wanted for the lamps alone.
 const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), 0.42, 0.75, 1.0);
@@ -206,7 +257,6 @@ bloom.enabled = false;
 composer.addPass(bloom);
 const grade = new ShaderPass(GradeShader);
 composer.addPass(grade);
-composer.addPass(new OutputPass());
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -214,6 +264,7 @@ function resize() {
   renderer.setSize(w, h, false);
   composer.setPixelRatio(renderer.getPixelRatio());
   composer.setSize(w, h);
+  picture.setSize(composer.readBuffer.width, composer.readBuffer.height);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   zelpa.resize(w, h);
@@ -622,6 +673,26 @@ function stepWarp(dt) {
 const STAR_GLOW = 2.0;
 const clock = new THREE.Clock();
 let frame = 0;
+let sunOwed = true, glowOwed = true; // the bedroom's two shadows, wanting drawing as soon as it can be seen
+
+/**
+ * Whether anything of the bedroom can be seen: from in it, always; from anywhere else only through its door and its
+ * window (the outsides of its walls are the house's), so not with neither of them in view. From the kitchen it was
+ * drawn whole behind the corridor's walls every frame, for nothing.
+ */
+const OPENINGS = [
+  // (the door's reaching out into the corridor: Luna, lying in the doorway, is the bedroom's)
+  new THREE.Box3(new THREE.Vector3(ROOM.door.x0 - 0.4, 0, ROOM.D - 0.1), new THREE.Vector3(ROOM.door.x1 + 0.4, ROOM.door.h + 0.15, ROOM.D + ROOM.T + 0.6)),
+  new THREE.Box3(new THREE.Vector3(ROOM.win.x0 - 0.15, ROOM.win.y0 - 0.15, -ROOM.T - 0.1), new THREE.Vector3(ROOM.win.x1 + 0.15, ROOM.win.y1 + 0.15, 0.1)),
+];
+const inView = new THREE.Frustum(), viewProj = new THREE.Matrix4();
+function bedroomSeen() {
+  const p = camera.position, T = ROOM.T + 0.1;
+  if (p.x > -T && p.x < ROOM.W + T && p.z > -T && p.z < ROOM.D + T && p.y > -0.5 && p.y < ROOM.H + 0.5) return true;
+  camera.updateMatrixWorld();
+  inView.setFromProjectionMatrix(viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  return OPENINGS.some((b) => inView.intersectsBox(b));
+}
 
 function animate(obj, dt, rate, apply) {
   const d = obj.target - (obj.tilt ?? obj.angle);
@@ -742,12 +813,18 @@ function tick() {
   // Luna out of sight behind the walls is not drawn: her fur, shell over shell, was a third of every frame
   // looking at the house from the yard, she indoors and nowhere to be seen (user, 2026-10-18: "the swing lags")
   if (frame % 3 === 0) cat.root.visible = catInSight();
-  const first = frame === 1;
-  const sunTurn = first || (shadowsDirty > 0 && frame % 2 === 0);
+  // (the bedroom out of sight: not drawn, and its shadows wait for it to come back into view)
+  const bedroomInView = inGame || bedroomSeen();
+  const sunTurn = bedroomInView && (sunOwed || (shadowsDirty > 0 && frame % 2 === 0));
   const moving = stirring > 0;
   if (moving && (stirring -= dt) <= 0) shadowsDirty = 3;
-  const glowTurn = first || (!sunTurn && (catMoved || moving || frame % 8 === 0));
-  if (sunTurn) shadowsDirty--;
+  if (catMoved || moving || frame % 8 === 0) glowOwed = true;
+  const glowTurn = bedroomInView && (sunOwed || (!sunTurn && glowOwed));
+  if (glowTurn) glowOwed = false;
+  if (sunTurn) {
+    shadowsDirty--;
+    sunOwed = false;
+  }
   cat.castShadows(!sunTurn && cat.root.parent !== house.scene); // the house's shadows are drawn once and kept: she mustn't be in them
   lights.sun.shadow.needsUpdate = sunTurn;
   lights.glow.shadow.needsUpdate = glowTurn;
@@ -770,9 +847,9 @@ function tick() {
     house.bath.simulate(renderer, dt); // its ripples, stepped on
     house.bath.reflect(renderer, house.scene, camera, [inventory.hand]); // the bathroom's water, mirroring the room
     const view = house.cellar.passes(camera);
-    roomPass.enabled = housePass.enabled = view.above;
+    roomPass.enabled = view.above && bedroomInView;
+    housePass.enabled = view.above;
     cellarPass.enabled = view.below;
-    cellarPass.clear = !view.above;
     composer.render(dt);
     inventory.draw();
   }
@@ -784,5 +861,5 @@ if (SHOT) startEl.hidden = true; // camera stays parked on the reference pose
 requestAnimationFrame(tick);
 
 // handles for tuning from the console
-window.GAME = { THREE, scene, camera, renderer, player, cat, boat, desktop, sound, inventory, sit: setSeated, stars: ctx.stars, lights, blind, door, bloom, grade, M, ROOM, START,
+window.GAME = { THREE, scene, camera, renderer, composer, passes: { room: roomPass, house: housePass, cellar: cellarPass }, player, cat, boat, desktop, sound, inventory, sit: setSeated, stars: ctx.stars, lights, blind, door, bloom, grade, M, ROOM, START,
   reshadow: () => { shadowsDirty = 3; }, zelpa, house, colliders: ctx.colliders, tv: ctx.tv, warpTo: startWarp, world: () => world };

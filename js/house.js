@@ -15,7 +15,7 @@ import { ROOM } from './room.js';
 import { box, boxMM, cyl, deg, mulberry32, canvasTex, HOUSE_SUN } from './util.js';
 import { curvedScreen, screenMat, takeable } from './props.js';
 import { glowMaterial, UV_TORCH } from './uvtorch.js';
-import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN } from './build.js';
+import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN } from './build.js';
 import { backYard } from './yard.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -567,7 +567,12 @@ export function buildHouse(renderer, bedroomM, ctx) {
   for (const l of shadowed) l.shadow.autoUpdate = false;
   let gain = 1.8, bedroomDoor = -1, doorTick = 0;
   const due = new Map(); // light → how many more frames its shadow wants drawing
-  const mark = (lights, n = 2) => { for (const l of lights) due.set(l, Math.max(due.get(l) ?? 0, n)); };
+  const mark = (lights, n = 2) => {
+    for (const l of lights) {
+      due.set(l, Math.max(due.get(l) ?? 0, n));
+      l.userData.stale = Math.max(l.userData.stale ?? 0, n); // (what stands still has moved: layeredShadow)
+    }
+  };
   mark(shadowed, 3);
   yard.shadowsMoved(() => mark([sun, sky], 2)); // (the spade taken off the sand, the sand dug)
   doors[1].lights = bathLamps; // the bathroom door
@@ -582,8 +587,11 @@ export function buildHouse(renderer, bedroomM, ctx) {
   // Mum (user, 2026-10-23): in the kitchen, between the sink and the table, arms folded, facing the way in from the
   // corridor (mother.js); she can see you anywhere in the kitchen and living room (one room, no wall between), up in
   // the house; once she is there, what she shades is drawn again
+  // (as she moves, the lamp's shadow is drawn again for her alone, over the house's as it was kept: layeredShadow)
+  let mum = null;
+  layeredShadow(renderer, scene, kitchenLight, () => (mum ? [mum] : []));
   mother(g, ctx, -1.45, 1.35, [-0.3, 4.9], (p) => p.y > 0.5 && p.x > L.x0 && p.x < L.x1 && p.z > L.z0 && p.z < L.z1,
-    { board: kit.board, moved: () => mark([kitchenLight], 1), renderer }).then(() => mark(shadowed, 2)); // (now and then off to the chopping board: the lamp's shadow of her drawn again as she goes)
+    { board: kit.board, moved: () => due.set(kitchenLight, Math.max(due.get(kitchenLight) ?? 0, 1)), renderer }).then((her) => { mum = her; mark(shadowed, 2); }); // (now and then off to the chopping board: the lamp's shadow of her drawn again as she goes)
   // the toilet's lid turns like a door does, and lets you know when it has
   const lid = bath.lid;
   lid.userData.door = { state: { angle: 0, target: 0 }, lights: bathLamps, apply() { lid.rotation.x = -this.state.angle; } }; // (down to begin with: user, 2026-10-20)
