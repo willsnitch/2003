@@ -10,7 +10,7 @@ The lore so far, decided and open, is in `LORE.md`.
 
 ## Status
 
-Work in progress, version 0.5.7. Changes by version are in `notes/versions.md`.
+Work in progress, version 0.5.10. Changes by version are in `notes/versions.md`.
 
 ## Run it
 

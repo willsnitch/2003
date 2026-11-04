@@ -298,6 +298,23 @@ and the current state; `notes/world.md` the approved state of the yard and the h
 - Lesson: a `sin`-based hash of large numbers differs between the GPU and JS — a test picking "a gusty moment" in JS
   found the trees still. Use an arithmetic hash (`windDice`).
 
+## The bath's film, the pool's bubbles, grass at the edges (2026-11-03, later)
+
+- "Up to the sixth tile a pale film on the water": the bathroom had one planar reflection, and while the floor's water
+  was still apart from the bath's (under the rim, 0.55 m) it went to the bath; the floor's showed the white room it
+  reflects when there is none. Each now has its own while both show (`floorMirror`, `floorU`; ~95k triangles more for
+  those seconds). Found by reading `bath.look.roomRefl` / `bathRefl` at a level, not by guessing.
+- The pool's bubbles: "horrible — not white, the rings too perfect; realistic, soft, a movement of the water that
+  spreads; light green, in keeping with the pool", then "darker". The ring is now the water's own slope in its
+  shader. Its sky is flat, so a ripple shows only where its slope runs along your view, the very parts a pixel's
+  footprint thins out at a slant: fading by the whole footprint killed them past 2 m; by each ring's own (`fwidth(r)`)
+  and slightly longer waves they hold to ~3 m.
+- The pool wall's worn patches ("too AI, not realistic"): a careful redo was turned down outright — "put it back
+  exactly as before" — and was put back, dice and all. With a look he complains about, show a small step before a
+  remake, and keep the old code to hand.
+- The line where the grass ended at the porch was a black box 4 cm behind its skirt; grass going on under a deck
+  needs its light taken away too (`underDeck`), or it glows in there.
+
 ## Testing
 
 - The Browser pane forwards his real input: set `GAME.player.setPose(...)` before measuring; aim rays at object
@@ -310,3 +327,6 @@ and the current state; `notes/world.md` the approved state of the yard and the h
   stop halfway: step ≤ ~120 frames a call, keep results in `window`. Real keys in the pane work (`computer` key), but
   unlocked the view follows the mouse: set yaw/pitch in the same batch, right before the key. `say('')` leaves the
   last line up for its 3 s.
+- Copying the canvas after an `await` gives black (the picture is already handed over): step one frame right before
+  `drawImage`, as `grid()` does. To judge something small at play distance, crop the full-size canvas round its
+  projected point instead of zooming the camera.

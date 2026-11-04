@@ -50,9 +50,9 @@ house: `notes/world.md`. Read only the part you need.
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting restarts after each write: the last was 2026-11-03 (rounds 1–5 of that day, written
-    as 0.5.9, a number proposed to him; 0.5.8, speed and the breeze, also only proposed); next is round 1. When a round brings a new playable block or
-    completes a batch, propose the next number and let him decide. Current: **0.5.7** (user, 2026-11-03; 0.5.1–0.5.3: Mum; 0.5.6:
+    round of the 5 it was. Counting restarts after each write: the last was 2026-11-04 (rounds 1–5 of 3–4 Nov, written
+    as 0.5.10, accepted 2026-11-04 with 0.5.8 and 0.5.9); next is round 1. When a round brings a new playable block or
+    completes a batch, propose the next number and let him decide. Current: **0.5.10** (user, 2026-11-04; 0.5.8: lighter + breeze; 0.5.9: fixes, pool bubbles; 0.5.10: the lawn's grass; 0.5.1–0.5.3: Mum; 0.5.6:
     the end of the garden; 0.5.7: the bath's cycle and the stone angel).
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
@@ -79,8 +79,9 @@ house: `notes/world.md`. Read only the part you need.
 ## Look and light (current, approved)
 
 - **18:00**: every light colour, sun position and sky comes from `js/daytime.js` (`DAY = EVENING`: sun 15° up,
-  golden; the lawn mostly in shade). `DUSK` holds the original approved evening light. The PC's and the cooker's
-  clocks show the evening; the stopped clocks stay at twenty to four.
+  golden; the lawn mostly in shade). `DUSK` holds the original approved evening light. Every clock reads
+  **6:04 PM** (owner, 2026-11-04), the stopped ones too. In the build the stopped clocks still show twenty to four:
+  the owner will change them later (docs only for now).
 - **No bloom** (`bloom.enabled = false` in `main.js`): he hates halos. Never re-enable.
 - Whites must not glow: off-white, not too glossy; in the house no lighter than the plates (≈0xd5cfc2, rough ≥ 0.45).
   `buildHouse` makes its own `M.trim`/`M.door`; never give a house material the bathroom's `cool` env outside the
@@ -116,12 +117,12 @@ house: `notes/world.md`. Read only the part you need.
   door; `hingedDoor` takes `before(opening)` and `turn(open)`), `fixtures.js` (toilet, bath, basin, taps, sofa, TV,
   rug, ceiling lights…), `build.js` (metric UVs, walls with holes, `bakeStatic`, shadow helpers), `bath.js` (taps: E
   on either turns both on, never off; filling, flood, underwater, the floating towel; `drain`: all of it back down the
-  plug hole), `boat.js` (Luna's boat, sou'wester, diving gear; on a drain the boat is sucked into the bath and she
+  plug hole; two planar reflections while the floor's water and the bath's are apart, `floorMirror`), `boat.js` (Luna's boat, sou'wester, diving gear; on a drain the boat is sucked into the bath and she
   shakes the suit off in a poof), `uvtorch.js` (beam held = on; the basin's traces with the light off, switch by the
   bathroom door), `water.js` (the water's look; `RippleSim` — stir it with `bath.disturb(x, z, amp, r)`), `mother.js`
   (Mum in the kitchen; how to work on her: `notes/history.md`, "Mum").
 - Outside: `yard.js` (garden, neighbours, street, flamingos, tap), `hose.js` (verlet rope), `grove.js` (the wood),
-  `pool.js` (the end of the garden, past the wood), `basement.js`. The angel is his Meshy model, `assets/models/angel.glb`, shrunk once in Blender
+  `pool.js` (the end of the garden, past the wood; bubbles and the ripples they leave, `poolBubbles`/`poolRipples`), `basement.js`. The angel is his Meshy model, `assets/models/angel.glb`, shrunk once in Blender
   (decimate 30 %, the texture's seams and everything up to the feet locked — unlocked, the plinth's texture warped:
   660k → 198k triangles; colour 8192 → 4096 px, normal 2048, roughness 1024; 80 → 15 MB).
 - The breeze (2026-11-03): `WIND` in grove.js, its time from `house.update`. Leaf cards, the neighbours' crowns and
@@ -205,7 +206,8 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - **No sounds of the game's own** (2026-10-15: he found everything generated bad, kept only his pigeon). Every sound
   is silent until a recording of that name is in `assets/sounds/` (`README.txt` has the list). Missing above all:
   `room-tone` (a looping base for every room), steps, doors, water, Luna, the PC and TV.
-- What the inventory items are for; what Zelpa's key opens; what goes in the Zelpa loft.
+- Clocks (2026-11-04): every clock should read 6:04 PM; the stopped clocks in the build still show twenty to four.
+  Docs updated, the game not yet (later).
 - Noticed, not asked: the fence boards (`fenceBoardTex`) look blotchy up close. Luna's eyes in the living room fixed in
   code (`cat.housed`) but never seen in an image.
 - Deploy to Netlify (needs his go-ahead; the whole folder, not just `index.html`).
@@ -222,5 +224,9 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - The breeze (2026-11-03, his second notes: "light, slow, random, now and then; the willow only a little slower"):
   not yet seen by him in play. Still: the long grass, tufts, weeds and the leaf litter. Mum costs ~5 ms in the
   kitchen whatever her shader (her geometry, cause not found).
+- Not yet seen by him in play (2026-11-03): the bath's floor water now reflecting from the first centimetre; the
+  pool's bubbles (darker green, the water rippling where they come up and burst; from ~4 m at a slant the ripples
+  hardly show); the grass going on under the porch's skirt and 30–40 cm past the lawn's fences, the long grass along
+  the skirt (mine: the mower can't get there), the 14 lawn weeds. Not measured: fps with the extra grass.
 - Mum's right fist (2026-10-25/27): not yet judged by him, above all the wrist, cocked ~45° towards the little
   finger while she cuts, up to ~60° as she puts the knife down.

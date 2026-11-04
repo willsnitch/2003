@@ -169,7 +169,7 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   his own model (a figure on a two-step plinth, 2.05 m to the wing tips), made light for the game (80 → 15 MB)
   with its feet, plinth and inscription exactly as in his model.
 
-## 0.5.8 — lighter, and a breeze (2026-11-03; number proposed)
+## 0.5.8 — lighter, and a breeze (2026-11-03)
 - Lighter with the same picture (checked pixel by pixel): 11–44 % more frames a second depending on where you are
   (bedroom 35 → 47–50, bathroom 40 → 55, porch 31 → 45). The picture is smoothed and finished in one go; the kitchen
   lamp's shadow redraws only Mum as she moves; the bedroom isn't drawn when it can't be seen, and from inside it
@@ -178,7 +178,7 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   leaves, the neighbours' crowns and the hanging moss, lightly and slowly; the weeping willow's shoots swing all the
   time, gently; the light under the crowns moves on the lawn as the leaves do. Shadows stay still.
 
-## 0.5.9 — small fixes, bubbles in the pool, the kitchen socket (2026-11-03; number proposed)
+## 0.5.9 — small fixes, bubbles in the pool, the kitchen socket (2026-11-03)
 - 3 November (rounds 1–5): the bedroom sill no longer flickers; no line of sun on the window frame by the glass, nor
   along the top of the west wall with the blinds shut; no lines of light coming and going at the far corners of the
   corridor and the bathroom (shadows and room limits now taken on the surface itself). Luna follows you into the
@@ -189,3 +189,11 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   spills out of its open door into the corridor. The fan starts again slowly, over half a second. Lighter in the
   bathroom: with its door shut nothing behind its walls is drawn (the water's reflection had redrawn the whole house
   and garden every frame: 8 million triangles a frame → 0.3–0.4).
+
+## 0.5.10 — the lawn's own grass (2026-11-04)
+- 3–4 November (rounds 1–5): the water on the bathroom floor reflects from its first centimetre. The pool's bubbles
+  darker green, the surface rippling where they come up and burst; the pool's wall back exactly as it was. The grass
+  goes on in under the porch, thinning out within 40 cm, and 30–40 cm past the side fences; long along the porch's
+  skirt; a few weeds among the longest of it. Short real grass all over the lawn, between and under the tufts: small,
+  close, even clumps of mown blades (not strips), coloured from the lawn, thinning on worn spots and the path, none
+  on bare earth or leaf heaps, never into anything standing or lying there (the fence, posts, steps, the torch...).

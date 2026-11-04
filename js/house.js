@@ -803,7 +803,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
         mark([spill]);
       }
       bath.water.update(dt, time);
-      yard.update(dt, time);
+      yard.update(dt, time, eye); // (eye: where the grass is drawn finest)
       cellarWay.update(dt, time);
     },
   };

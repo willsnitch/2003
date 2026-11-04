@@ -78,7 +78,7 @@ function needleFall(x, z) {
 }
 
 /** How bare the ground is at x, z: 0 thick grass … 1 no grass at all. */
-function bareness(x, z) {
+function bareness(x, z, eaves = true) { // (eaves: with the dry strip along the house; not for the short grass's carpet)
   // bald patches where nothing much grows, big and small, their edges ragged (user, 2026-10-17: more random)
   const rag = fbm(x * 5.3 + 2.1, z * 5.3 + 8.4, 0.5, 2) - 0.5;
   let b = Math.max(0, fbm(x * 0.42 + 11.3, z * 0.42 + 3.7, 0.5, 4) - 0.55 + rag * 0.12) * 4;
@@ -97,7 +97,7 @@ function bareness(x, z) {
   b = Math.max(b, 0.7 * (1 - THREE.MathUtils.smoothstep(outside(x, z, SANDBOX) + rag * 0.25, -0.1, 0.35)));
   b = Math.max(b, 0.75 * (1 - THREE.MathUtils.smoothstep(outside(x, z, { ...TOWER, z0: TOWER.z0 - TOWER.run - 0.2 }) + rag * 0.3, -0.05, 0.45)));
   // along the house the eaves keep the rain off: dry and thin
-  b = Math.max(b, 0.55 * (1 - THREE.MathUtils.smoothstep(-t - z, 0.0, 0.5)));
+  if (eaves) b = Math.max(b, 0.55 * (1 - THREE.MathUtils.smoothstep(-t - z, 0.0, 0.5)));
   // under the grove's trees: bare round the trunks, thin in their shade, a carpet of needles under the spruce
   for (const [kind, { at: [tx, tz], reach }] of Object.entries(GROVE)) {
     const d0 = Math.hypot(x - tx, z - tz);
@@ -355,6 +355,8 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   };
   groundAt = (x, z) => play.sandAt(x, z) ?? Math.max(z < -5.35 ? heapAt(x, z) : 0, rootTop(x, z));
   for (const tree of Object.values(wood)) if (tree.trunk) hoseOnly.push({ type: 'trunk', ...tree.trunk }); // (the trunks as they are, to lie against)
+  // and the short grass all over the lawn (user, 2026-11-03), last: it keeps clear of all of the above (its own dice)
+  const lawnGrass = shortGrass(g, ground, heapAt, ctx.colliders.filter(() => true).concat(hoseOnly));
 
   return {
     wood, swing, birdInTree, past, // (for checking)
@@ -366,7 +368,8 @@ export function backYard(g, M, mat, ctx, scene, plan) {
       for (const c of clouds) c.color.setScalar(0.9 * gain);
       glowMat.color.setScalar(gain);
     },
-    update(dt, time) {
+    update(dt, time, eye) {
+      if (eye) lawnGrass.update(eye);
       swing.sway(time, dt);
       play.update(dt);
       hose?.update(dt, time);
@@ -625,7 +628,11 @@ function longGrass(g, r, lawnPicture) {
     e.set((d() - 0.5) * 0.25, d() * Math.PI, (d() - 0.5) * 0.25);
     q.setFromEuler(e);
     const wide = Math.min(cap ?? Infinity, Math.min(1.5, Math.max(0.4, tall * 3.2)) * (0.7 + d() * 0.5)); // a short tuft is a narrow one: its blades not squashed
-    m.compose(p.set(x, 0, z), q, onCellar(x, z) || tall <= 0 ? s.set(0, 0, 0) : s.set(wide, tall, wide));
+    // (user, 2026-11-04: the short ones out on the lawn gone — "these star-shaped lines must go; leave the longer tufts": the
+    // lawn is the short grass's carpet now; kept: the long ones the mower can't reach, the few among the leaves. Their dice
+    // still thrown: nothing else moves)
+    const gone = i < old && tall < 0.12 && wood < 0.3;
+    m.compose(p.set(x, 0, z), q, onCellar(x, z) || tall <= 0 || gone ? s.set(0, 0, 0) : s.set(wide, tall, wide));
     tufts.setMatrixAt(i, m);
     under(x, z).lerp(green, Math.min(0.8, wood * 1.2));
     const k = 1.08 + (d() - 0.5) * 0.14;
@@ -660,6 +667,296 @@ function longGrass(g, r, lawnPicture) {
     weeds.receiveShadow = weeds.castShadow = true;
     g.add(weeds);
   });
+}
+
+/**
+ * The lawn's own short grass: an even carpet of mown blades over its picture wherever it grows (user, 2026-11-03: "real
+ * grass, like the tufts'; leave the tufts where they are, and for the rest short grass over the lawn's picture";
+ * 2026-11-04, of cards with blades drawn on them, first long strips, then small clumps: "you keep putting lines of
+ * grass: I want a simple, well-made carpet of grass"; then: "the star-shaped ones must go… it only shows in a circle round
+ * me, and it's too low"). So no cards: every blade a strip of its own, 3 000 to the square metre at random, 4–10 cm, mown
+ * at uneven heights, each leaning its own way (layers of a carpet drawn one over another, or followed down by the eye's
+ * ray, cost 6–11 ms: too much). Thinning on the worn
+ * spots and the path, none where it is bare, into the wood or under the leaf heaps; in under the porch thinner and
+ * leggier, gone by 35 cm or so; right up to the porch's steps and round the cellar's concrete (user, 2026-11-04: it was
+ * missing there — the dry strip under the eaves, which the picture and the tufts keep, isn't kept for it). Never into
+ * anything standing or lying there: a map of the lawn, a centimetre a point, of where a blade may be. Coloured from the
+ * lawn's picture under it, its dirt turned to the lawn's green where the carpet covers it; lit as the ground is. Its own
+ * dice, after everything else: nothing else moves.
+ */
+function shortGrass(g, groundMat, heapAt, obstacles) {
+  const t0 = performance.now(), rs = mulberry32(2251), ss = THREE.MathUtils.smoothstep, lawnPicture = groundMat.map.image;
+  const TOP = 0.105, TALL = 0.068; // (a blade TALL as a rule — as the tufts that were out on the lawn, user, 2026-11-04: "too low" — none over TOP)
+  const steps = Math.max(1, Math.round(LIFT / 0.15)), foot = -t - (steps - 1) * 0.28, sx0 = BACK.mid - 0.62, sx1 = BACK.mid + 0.62, PS = 0.09; // (as porch() builds its steps, and the handrails' posts at their foot)
+  const keepOff = [
+    [SANDBOX.x0 - 0.03, SANDBOX.x1 + 0.03, SANDBOX.z0 - 0.03, SANDBOX.z1 + 0.03], // the sandbox
+    [TOWER.x0 - 0.04, TOWER.x1 + 0.04, TOWER.z0 - TOWER.run - 0.1, TOWER.z1 + 0.04], // the slide's tower and its ladder
+    [1.8, 3.7, -7.0, -5.4], // the shed
+    [CELLAR.x0 - CELLAR.side, CELLAR.x1 + CELLAR.side, CELLAR.z0 - CELLAR.sill / 2 - OZ, CELLAR.z1 - OZ], // the cellar's concrete
+    [sx0 - 0.04, sx1 + 0.04, foot, -t], // the porch's steps, the boards nailed on outside their stringers
+    [sx0 - PS, sx0, foot - PS, foot], [sx1, sx1 + PS, foot - PS, foot], // the handrails' posts
+    [3.21, 3.33, 1.47, Y.z1], // the east downpipe's shoe, kicked out from the wall a hand's breadth over the lawn (house.js)
+  ];
+  // what stands on the lawn or lies on it: its boxes (the shed, the swing's and the slide's feet; not the porch's deck:
+  // the grass goes on in under it; not the fence's, wider than its boards), its poles and leaning legs as they meet the
+  // ground (not the bars along the steps' sides, there to keep you off them), the leaves lying on it one by one
+  const C = 0.012, low = TOP + 0.01;
+  const boxes = [...keepOff], poles = [];
+  for (const o of obstacles) {
+    const long = o.type === 'box' && Math.max(o.x1 - o.x0, o.z1 - o.z0) > 4 && Math.min(o.x1 - o.x0, o.z1 - o.z0) < 0.2;
+    if (o.type === 'box' && (o.base ?? 0) < low && o.top > 0 && !long && !(o.stand && o.step && o.top >= LIFT - 0.01)) boxes.push([o.x0, o.x1, o.z0, o.z1]);
+    else if (o.type === 'seg' && (o.base ?? 0) < low && Math.abs(o.bx - o.ax) + Math.abs(o.bz - o.az) < 0.01) poles.push([o.ax, o.az, o.bx, o.bz, o.r]);
+    else if (o.type === 'capsule') {
+      const [lo, hi] = o.a.y < o.b.y ? [o.a, o.b] : [o.b, o.a];
+      if (lo.y - o.r > low) continue;
+      const k = Math.min(1, Math.max(0, (low - lo.y) / Math.max(1e-6, hi.y - lo.y)));
+      poles.push([lo.x, lo.z, lo.x + (hi.x - lo.x) * k, lo.z + (hi.z - lo.z) * k, o.r]);
+    }
+  }
+  boxes.push(...FENCE_POSTS);
+  // (and the torch someone left lying in the grass by the cellar's west cheek, as basement.js puts it: 22 cm, on its side)
+  const tx = CELLAR.x0 - CELLAR.side - 0.4, tz = CELLAR.z0 - CELLAR.sill / 2 + 0.42 - OZ, ta = 0.55;
+  poles.push([tx - Math.cos(ta) * 0.11, tz + Math.sin(ta) * 0.11, tx + Math.cos(ta) * 0.11, tz - Math.sin(ta) * 0.11, 0.035]);
+
+  // ---- the carpet's lie every 5 cm: how thick (r), how tall (g); and its colour
+  const X0 = Y.x0, Z0 = Y.z0, CN = 0.05, cw = Math.ceil((Y.x1 - X0) / CN) + 1, cd = Math.ceil((Y.z1 - Z0) / CN) + 1;
+  const lie = new Uint8Array(cw * cd * 4), tint = new Uint8Array(cw * cd * 4), dirt = new Float32Array(cw * cd), wood = new Float32Array(cw * cd), worn = new Float32Array(cw * cd);
+  const pic = lawnPicture.getContext('2d').getImageData(0, 0, lawnPicture.width, lawnPicture.height), W = pic.width, H = pic.height;
+  const under = (x, z, out) => { // (the lawn's picture there, 5 cm round, as the tufts take it)
+    const cx = Math.round(((x - Y.x0) / (Y.x1 - Y.x0)) * (W - 1)), cy = Math.round(((z - Y.z0) / (Y.z1 - Y.z0)) * (H - 1));
+    let rr = 0, gg = 0, bb = 0, n = 0;
+    for (let dy = -4; dy <= 4; dy += 2) for (let dx = -4; dx <= 4; dx += 2) {
+      const k = (Math.min(H - 1, Math.max(0, cy + dy)) * W + Math.min(W - 1, Math.max(0, cx + dx))) * 4;
+      rr += pic.data[k]; gg += pic.data[k + 1]; bb += pic.data[k + 2]; n++;
+    }
+    out[0] = rr / n; out[1] = gg / n; out[2] = bb / n;
+  };
+  const green = [0, 0, 0, 0], col = [0, 0, 0];
+  for (let j = 0; j < cd; j++) for (let i = 0; i < cw; i++) {
+    const x = X0 + i * CN, z = Z0 + j * CN, k = j * cw + i, v = rs();
+    const bN = bareness(x, z, false), bF = Math.max(bN, 0.55 * (1 - ss(-t - z, 0.0, 0.5))), w = woodland(x, z); // (bF: as the picture has it, with the eaves' dry strip)
+    let d = (1 - ss(bN + (v - 0.5) * 0.12, 0.18, 0.66)) * (1 - ss(w + (v - 0.5) * 0.08, 0.1, 0.36));
+    let hf = (1 - 0.6 * ss(bN, 0.05, 0.6)) * (0.94 + 0.12 * fbm(x * 0.9 + 31, z * 0.9 + 17, 0.5, 3));
+    if (x < PX1 && z > -t) { // in under the porch: fewer the further in from its skirt (front, east end: the dark begins 45 cm in), leggier
+      const dIn = Math.min(z + t, PX1 - x);
+      d *= 1 - ss(dIn, 0.04, 0.36);
+      hf *= 1 + 0.4 * ss(dIn, 0.02, 0.3);
+    }
+    lie[k * 4] = Math.round(255 * d); lie[k * 4 + 1] = Math.round(255 * Math.min(1, hf / 1.5)); lie[k * 4 + 3] = 255;
+    dirt[k] = ss(bF, 0.25, 0.75); wood[k] = w; worn[k] = bN;
+    under(x, z, col);
+    tint.set([col[0], col[1], col[2]], k * 4);
+    if (bF < 0.1 && w < 0.05) { green[0] += col[0]; green[1] += col[1]; green[2] += col[2]; green[3]++; } // (the lawn's own green, where it is all grass)
+  }
+  for (let c = 0; c < 3; c++) green[c] /= Math.max(1, green[3]);
+  for (let k = 0; k < cw * cd; k++) { // the dirt in the picture turned to the lawn's green under the carpet; where it is worn, a paler, duller green
+    const p = Math.max(0.85 * dirt[k], Math.min(0.8, wood[k] * 1.2)), pale = 0.12 * ss(worn[k], 0.1, 0.6);
+    for (let c = 0; c < 3; c++) {
+      const gC = green[c] * (1 + pale) + (((green[0] + green[1] + green[2]) / 3) - green[c]) * pale * 2;
+      tint[k * 4 + c] = Math.round(Math.min(255, tint[k * 4 + c] + (gC - tint[k * 4 + c]) * p));
+    }
+    tint[k * 4 + 3] = 255;
+  }
+
+  // ---- where a blade may be, a centimetre a point: not within a centimetre or so of anything standing or lying there
+  const MN = 0.01, mw = Math.ceil((Y.x1 - X0) / MN) + 1, md = Math.ceil((Y.z1 - Z0) / MN) + 1, free = new Uint8Array(mw * md).fill(255);
+  const iOf = (x) => (x - X0) / MN, jOf = (z) => (z - Z0) / MN;
+  const block = (x0, x1, z0, z1) => {
+    for (let j = Math.max(0, Math.ceil(jOf(z0 - C))); j <= Math.min(md - 1, Math.floor(jOf(z1 + C))); j++) free.fill(0, j * mw + Math.max(0, Math.ceil(iOf(x0 - C))), j * mw + Math.min(mw - 1, Math.floor(iOf(x1 + C))) + 1);
+  };
+  const disc = (ax, az, bx, bz, r) => {
+    const ux = bx - ax, uz = bz - az, l = ux * ux + uz * uz, R = r + C;
+    for (let j = Math.max(0, Math.floor(jOf(Math.min(az, bz) - R))); j <= Math.min(md - 1, Math.ceil(jOf(Math.max(az, bz) + R))); j++)
+      for (let i = Math.max(0, Math.floor(iOf(Math.min(ax, bx) - R))); i <= Math.min(mw - 1, Math.ceil(iOf(Math.max(ax, bx) + R))); i++) {
+        const x = X0 + i * MN, z = Z0 + j * MN, k = l > 1e-9 ? Math.min(1, Math.max(0, ((x - ax) * ux + (z - az) * uz) / l)) : 0;
+        if (Math.hypot(x - ax - ux * k, z - az - uz * k) < R) free[j * mw + i] = 0;
+      }
+  };
+  block(X0 - 1, X0 + 0.035 - C, Z0 - 1, Y.z1 + 1); // (the fence's boards, leaning a little)
+  block(Y.x1 - 0.035 + C, Y.x1 + 1, Z0 - 1, Y.z1 + 1);
+  block(X0 - 1, Y.x1 + 1, Y.z1 - 0.03 + C, Y.z1 + 1); // (the house's wall)
+  block(X0 - 1, PX1, -t, -t + 0.16); // (the porch's skirt along its front, and what it is nailed to)
+  block(PX1 - 0.09, PX1, -t, Y.z1 + 1); // (and at its east end)
+  block(X0 - 1, X0 + 0.16, -t, Y.z1 + 1); // (and at its west end, by the fence)
+  for (const [x0, x1, z0, z1] of boxes) block(x0, x1, z0, z1);
+  for (const [ax, az, bx, bz, r] of poles) disc(ax, az, bx, bz, r + 0.01); // (a pole's collider a little thinner than it, some)
+  const lm = new THREE.Matrix4(), lp = new THREE.Vector3(), lq = new THREE.Quaternion(), ls = new THREE.Vector3();
+  for (const o of g.children) {
+    if (!o.isInstancedMesh || !String(o.material.customProgramCacheKey?.()).startsWith('litter')) continue;
+    for (let i = 0; i < o.count; i++) {
+      o.getMatrixAt(i, lm);
+      lm.decompose(lp, lq, ls);
+      if (lp.x < X0 || lp.x > Y.x1 || lp.z < Z0 || lp.z > Y.z1) continue;
+      disc(lp.x, lp.z, lp.x, lp.z, 0.71 * Math.max(Math.abs(ls.x), Math.abs(ls.z))); // (to its square's corners)
+    }
+  }
+  // the leaf heaps' mound, as leafHeaps() builds it: 5 cm squares from the yard's corner, out to −5.4, each drawn where a
+  // corner of it stands 3 mm or more
+  const SM = 0.05, hx = Math.round((Y.x1 - X0) / SM) + 1, hz = Math.round((-5.4 - Z0) / SM) + 1, HH = new Float32Array(hx * hz);
+  for (let j = 0; j < hz; j++) for (let i = 0; i < hx; i++) HH[j * hx + i] = heapAt(X0 + i * SM, Z0 + j * SM);
+  for (let j = 0; j < hz - 1; j++) for (let i = 0; i < hx - 1; i++) {
+    const a = j * hx + i;
+    if (Math.max(HH[a], HH[a + 1], HH[a + hx], HH[a + hx + 1]) >= 0.003) block(X0 + i * SM, X0 + (i + 1) * SM, Z0 + j * SM, Z0 + (j + 1) * SM);
+  }
+
+  // ---- the blades: one square metre of them, 3 000 at random (never in rows: user, 2026-11-04), laid over the lawn square by
+  // square wherever there's any of it, turned and flipped each its own way; each blade a narrow strip from its root to its
+  // cut tip, leaning its own way. Where it stands decides it on the card (vertex shader): none where `free` says so at its
+  // root, middle or tip, fewer where the lawn is thin (`lie`), its height and colour from there. Near (to 4.5 m) all of
+  // them; further, one in three, wider, the others shrinking away first; from 8.5 m they go down into the ground, which is
+  // coloured as the carpet looks from there (carpetUnder): no edge to it anywhere.
+  const N = 55, PER = N * N, rb = mulberry32(2269), blades = [];
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const short = rb() < 0.08;
+    blades.push([(i + 0.5 + (rb() - 0.5) * 0.98) / N, (j + 0.5 + (rb() - 0.5) * 0.98) / N, rb() * Math.PI, rb(), short ? 0.35 + rb() * 0.25 : 0.62 + rb() * 0.38, rb(), rb() * Math.PI * 2, rb() ** 1.5 * 0.4]); // u, v, yaw, rank, height, shade, lean's way, lean
+  }
+  const patch = (list) => {
+    const n = list.length, root = new Float32Array(n * 16), blade = new Float32Array(n * 16), pos = new Float32Array(n * 12), idx = new Uint16Array(n * 6);
+    list.forEach(([u, v, yaw, rank, h, shade, la, lean], b) => {
+      [[-1, 0], [1, 0], [-1, 1], [1, 1]].forEach(([side, tt], c) => {
+        const k = b * 4 + c;
+        root.set([u, v, yaw, rank], k * 4);
+        blade.set([side, tt, h, shade], k * 4);
+        pos.set([u, tt * 0.1, v], k * 3);
+      });
+      idx.set([b * 4, b * 4 + 1, b * 4 + 3, b * 4, b * 4 + 3, b * 4 + 2], b * 6);
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aRoot', new THREE.BufferAttribute(root, 4));
+    geo.setAttribute('aBlade', new THREE.BufferAttribute(blade, 4));
+    const lean = new Float32Array(n * 8);
+    list.forEach(([, , , , , , la, l], b) => { for (let c = 0; c < 4; c++) lean.set([la, l], (b * 4 + c) * 2); });
+    geo.setAttribute('aLean', new THREE.BufferAttribute(lean, 2));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    return geo;
+  };
+  const near = patch(blades), farGeo = patch(blades.filter((b) => b[3] < 1 / 3));
+  // the squares the lawn has any grass in
+  const squares = [];
+  for (let z = Math.floor(Z0); z < Y.z1; z++) for (let x = Math.floor(X0); x < Y.x1; x++) {
+    let any = false;
+    for (let j = Math.floor((z - Z0) / CN) - 1; j <= Math.ceil((z + 1 - Z0) / CN) + 1 && !any; j++) for (let i = Math.floor((x - X0) / CN) - 1; i <= Math.ceil((x + 1 - X0) / CN) + 1 && !any; i++) if (i >= 0 && j >= 0 && i < cw && j < cd && lie[(j * cw + i) * 4] > 0) any = true;
+    if (any) squares.push([x, z, (Math.imul(x * 73856093 ^ z * 19349663, 1) >>> 0) % 8, ((Math.imul(x * 83492791 ^ z * 2971215073, 1) >>> 0) % 1000) / 1000]);
+  }
+  const data = (arr, w, h, fmt, nearest) => {
+    const tx = new THREE.DataTexture(arr, w, h, fmt);
+    tx.magFilter = tx.minFilter = nearest ? THREE.NearestFilter : THREE.LinearFilter;
+    tx.needsUpdate = true;
+    return tx;
+  };
+  const tintTex = data(tint, cw, cd, THREE.RGBAFormat);
+  tintTex.colorSpace = THREE.SRGBColorSpace;
+  const uniforms = {
+    uLie: { value: data(lie, cw, cd, THREE.RGBAFormat) }, uTint: { value: tintTex }, uFree: { value: data(free, mw, md, THREE.RedFormat, true) }, uLean: { value: T.lawnPatchTex() },
+    uGrid: { value: new THREE.Vector4(X0, Z0, 1 / cw, 1 / cd) }, uFreeSize: { value: new THREE.Vector2(1 / mw, 1 / md) }, uOff: { value: new THREE.Vector2(0, OZ) },
+  };
+  const mat = underDeck(bothFacesLit(std({ color: 0xffffff, roughness: 1, side: THREE.DoubleSide }), 'lawn-blades'));
+  const before = mat.onBeforeCompile, key = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (sh, rr) => {
+    before.call(mat, sh, rr);
+    Object.assign(sh.uniforms, uniforms);
+    sh.vertexShader = `attribute vec4 aRoot, aBlade, aSquare;
+attribute vec2 aLean;
+uniform sampler2D uLie, uTint, uFree, uLean;
+uniform vec4 uGrid;
+uniform vec2 uFreeSize;
+varying vec3 vGrass;
+float lawnFree( vec2 p ) { return texture( uFree, ( ( p - uGrid.xy ) / ${MN.toFixed(2)} + 0.5 ) * uFreeSize ).r; }
+` + sh.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3( 0.0, 1.0, 0.0 ); // (lit as the ground is)').replace('#include <begin_vertex>', `
+      // the square it's in, turned and flipped its own way; the blade's root there, in the yard
+      vec2 uv = aRoot.xy;
+      float o = aSquare.z, r = mod( o, 4.0 );
+      if ( o >= 4.0 ) uv.x = 1.0 - uv.x;
+      uv = r == 1.0 ? vec2( 1.0 - uv.y, uv.x ) : r == 2.0 ? vec2( 1.0 - uv.x, 1.0 - uv.y ) : r == 3.0 ? vec2( uv.y, 1.0 - uv.x ) : uv;
+      vec2 root = aSquare.xy + uv;
+      vec2 st = ( ( root - uGrid.xy ) / ${CN.toFixed(2)} + 0.5 ) * uGrid.zw;
+      vec2 lie = texture( uLie, st ).rg;
+      float h = fract( aBlade.z + aSquare.w * 0.37 ), shade = fract( aBlade.w + aSquare.w * 1.71 ), die = fract( aRoot.w * 13.37 + aSquare.w );
+      h = h < 0.08 ? 0.35 + h * 3.0 : 0.62 + ( h - 0.08 ) * 0.41; // (mown at uneven heights, the odd one short)
+      float d = distance( cameraPosition, ( modelMatrix * vec4( root.x, 0.0, root.y, 1.0 ) ).xyz );
+      float thin = smoothstep( 3.6, 4.5, d ), keep = aRoot.w < 0.3334 ? 1.0 : 1.0 - thin;
+      float H = ${TALL.toFixed(3)} * 1.5 * lie.g * h * keep * ( 1.0 - smoothstep( 8.5, 11.0, d ) );
+      float W = ( 0.0035 + 0.0025 * shade ) * ( aRoot.w < 0.3334 ? 1.0 + 0.7 * thin : 1.0 ) * keep;
+      vec2 way = vec2( cos( aLean.x ), sin( aLean.x ) ) * sin( aLean.y ) * H, across = vec2( cos( aRoot.z ), sin( aRoot.z ) );
+      vec2 tip = root + way, mid = root + way * 0.5;
+      if ( die > lie.r || H < 0.004 || lawnFree( root ) < 0.5 || lawnFree( mid ) < 0.5 || lawnFree( tip ) < 0.5 ) { H = 0.0; W = 0.0; }
+      float t = aBlade.y;
+      vec2 at = root + way * t + across * aBlade.x * W * mix( 0.5, 0.18, t ); // (wide at its root, its cut tip narrower)
+      vec3 transformed = vec3( at.x, cos( aLean.y ) * H * t, at.y );
+      // its colour: the lawn's there; each blade its own, darker or lighter, one in twenty gone dry; dark at its root
+      // down among the others, its tip catching the light (as bright as the lawn was on the whole: measured, 2026-11-04)
+      float patchy = 0.6 * texture( uLean, root * 0.9 ).b + 0.4 * texture( uLean, root * 0.37 + 0.31 ).b;
+      vGrass = texture( uTint, st ).rgb * mix( 0.62, 1.35, t ) * ( 0.8 + 0.4 * shade ) * ( 0.9 + 0.2 * patchy );
+      if ( shade > 0.95 ) vGrass *= vec3( 1.25, 1.12, 0.72 );`);
+    // (each blade a few millimetres across: its shadow looked up once, not soft — the soft kind, read 9 times for every
+    // point of every blade, cost 4.5 ms of the grass's 6.5; and no moving sun spots on them, the ground under has those)
+    sh.fragmentShader = '#undef SHADOWMAP_TYPE_PCF_SOFT\n#undef SHADOWMAP_TYPE_PCF\nvarying vec3 vGrass;\n' + sh.fragmentShader.replace('#include <map_fragment>', 'diffuseColor.rgb *= vGrass;');
+  };
+  mat.customProgramCacheKey = () => key() + '|blades';
+  const meshes = [near, farGeo].map((geo) => {
+    const m = new THREE.InstancedMesh(geo, mat, squares.length);
+    geo.setAttribute('aSquare', new THREE.InstancedBufferAttribute(new Float32Array(squares.length * 4), 4));
+    m.count = 0;
+    m.frustumCulled = false; // (its squares are chosen each frame: update)
+    m.receiveShadow = true;
+    m.userData.live = true;
+    g.add(m);
+    return m;
+  });
+  meshes[0].name = 'short-grass';
+  meshes[0].userData = { live: true, free, mw, md, lie, cw, cd, X0, Z0, squares: squares.length, buildMs: performance.now() - t0 }; // (the rest for checking)
+  carpetUnder(groundMat, uniforms);
+  // each frame: the squares in view (the eye's camera, once it has drawn: its frustum, a little wider), near ones whole, the
+  // others one blade in three; none past 11.5 m
+  let cam = null;
+  const eyeOf = { v: null }, fr = new THREE.Frustum(), pm = new THREE.Matrix4(), sph = new THREE.Sphere(), cp = new THREE.Vector3();
+  meshes[0].onBeforeRender = meshes[1].onBeforeRender = (r, s, camera) => { if (camera.position === eyeOf.v) cam = camera; };
+  return {
+    update(eye) {
+      eyeOf.v = eye;
+      if (cam) {
+        cam.updateMatrixWorld();
+        const wide = cam.clone(false);
+        wide.fov = Math.min(170, cam.fov + 20); wide.aspect = cam.aspect * 1.15; wide.near = 0.01; wide.updateProjectionMatrix();
+        fr.setFromProjectionMatrix(pm.multiplyMatrices(wide.projectionMatrix, cam.matrixWorldInverse));
+      }
+      const a = meshes[0].geometry.attributes.aSquare, b = meshes[1].geometry.attributes.aSquare;
+      let na = 0, nb = 0;
+      for (const [x, z, o, seed] of squares) {
+        cp.set(x + 0.5, OY + 0.05, z + 0.5 + OZ); // (its middle, in the world)
+        const dx = Math.max(0, Math.abs(eye.x - cp.x) - 0.5), dz = Math.max(0, Math.abs(eye.z - cp.z) - 0.5), d = Math.hypot(dx, dz, eye.y - cp.y);
+        if (d > 11.5 || (cam && !fr.intersectsSphere(sph.set(cp, 0.75)))) continue;
+        if (d < 4.6) a.array.set([x, z, o, seed], 4 * na++);
+        else b.array.set([x, z, o, seed], 4 * nb++);
+      }
+      meshes[0].count = na; meshes[1].count = nb;
+      a.needsUpdate = b.needsUpdate = true;
+    },
+  };
+}
+
+/**
+ * The ground under the short grass's carpet, coloured as the carpet is seen from where you are: close to, the dark down
+ * among the blades; further off, where the blades are less than a point each and then not drawn at all, as the whole of
+ * it looks from there — so the carpet has no edge, near or far (user, 2026-11-04: "it only shows in a circle round me").
+ */
+function carpetUnder(mat, { uLie, uTint, uLean, uGrid, uOff }) {
+  const before = mat.onBeforeCompile, key = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (sh, rr) => {
+    before.call(mat, sh, rr);
+    Object.assign(sh.uniforms, { uLie, uTint, uLean, uGrid, uOff });
+    sh.vertexShader = 'uniform vec2 uOff;\ncentroid varying vec2 vCarpet;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvCarpet = ( modelMatrix * vec4( transformed, 1.0 ) ).xz - uOff;');
+    sh.fragmentShader = 'uniform sampler2D uLie, uTint, uLean;\nuniform vec4 uGrid;\ncentroid varying vec2 vCarpet;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      {
+        vec2 st = ( ( vCarpet - uGrid.xy ) / 0.05 + 0.5 ) * uGrid.zw;
+        float lie = texture2D( uLie, st ).r, patchy = 0.6 * texture2D( uLean, vCarpet * 0.9 ).b + 0.4 * texture2D( uLean, vCarpet * 0.37 + 0.31 ).b;
+        vec3 seen = texture2D( uTint, st ).rgb * mix( 0.95, 1.2, smoothstep( 2.0, 10.0, length( vViewPosition ) ) ) * ( 0.9 + 0.2 * patchy );
+        diffuseColor.rgb = mix( diffuseColor.rgb, seen, smoothstep( 0.0, 0.6, lie ) );
+      }`);
+  };
+  mat.customProgramCacheKey = () => key() + '|carpet-under';
+  mat.needsUpdate = true;
 }
 
 /**
@@ -1001,6 +1298,7 @@ function sunGlowTex(stops) {
   return tex;
 }
 
+const FENCE_POSTS = []; // (where the fence's posts stand, x0, x1, z0, z1)
 function fence(g, mat, ctx, r0) {
   const HIGH = 1.8, WIDE = 0.14, GAP = 0.012;
   // (2026-10-29: the far side moved out past the pool, its boards as they were; each side carried on from where it ended,
@@ -1042,6 +1340,7 @@ function fence(g, mat, ctx, r0) {
       const s = (i / posts) * len;
       const px = ax + ux * s + inX * 2, pz = az + uz * s + inZ * 2;
       g.add(slab(px - 0.045, px + 0.045, 0, HIGH - 0.05, pz - 0.045, pz + 0.045, mat.rail));
+      FENCE_POSTS.push([px - 0.045, px + 0.045, pz - 0.045, pz + 0.045]); // (for the short grass to keep off)
     }
     for (const y of [0.35, 1.42]) {
       const x0 = Math.min(ax, bx) + inX, x1 = Math.max(ax, bx) + inX, z0 = Math.min(az, bz) + inZ, z1 = Math.max(az, bz) + inZ;

@@ -3310,6 +3310,28 @@ export function grassTuftTex() {
   }));
 }
 
+/**
+ * For the lawn's short grass (yard.js `shortGrass`): which way its blades are combed over the lawn, a little this way and
+ * that in patches a metre or so across (rg, 0.5 = upright), and smaller patches lighter and darker (b). Tiling.
+ */
+export function lawnPatchTex() {
+  const L = 64, ld = new Uint8Array(L * L * 4);
+  for (let y = 0; y < L; y++) for (let x = 0; x < L; x++) { // (tiling: the noise round a torus)
+    const a = (x / L) * Math.PI * 2, b = (y / L) * Math.PI * 2, k = (y * L + x) * 4;
+    const nx = fbm(Math.cos(a) * 1.3 + 4, Math.sin(a) * 1.3 + Math.cos(b) * 1.3, Math.sin(b) * 1.3 + 7, 3), ny = fbm(Math.cos(a) * 1.3 + 21, Math.sin(a) * 1.3 + Math.cos(b) * 1.3 + 9, Math.sin(b) * 1.3 + 2, 3);
+    ld[k] = Math.round(255 * Math.min(1, Math.max(0, 0.5 + (nx - 0.5) * 2.2)));
+    ld[k + 1] = Math.round(255 * Math.min(1, Math.max(0, 0.5 + (ny - 0.5) * 2.2)));
+    const np = fbm(Math.cos(a) * 3.2 + 13, Math.sin(a) * 3.2 + Math.cos(b) * 3.2 + 5, Math.sin(b) * 3.2 + 11, 3); // (b: lighter and darker patches)
+    ld[k + 2] = Math.round(255 * Math.min(1, Math.max(0, 0.5 + (np - 0.5) * 2.4)));
+    ld[k + 3] = 255;
+  }
+  const lean = new THREE.DataTexture(ld, L, L, THREE.RGBAFormat);
+  lean.wrapS = lean.wrapT = THREE.RepeatWrapping;
+  lean.magFilter = lean.minFilter = THREE.LinearFilter;
+  lean.needsUpdate = true;
+  return lean;
+}
+
 /** Leaves for the trees round the yard: a clump of them, clear round the edge. */
 export function leafClumpTex(seed = 231, hue = 0) {
   return bleed(canvasTex(256, 256, (g, w, h) => {
@@ -7089,11 +7111,11 @@ export function mossNoiseTex() {
  * The pool's wall, unrolled (`len` metres round it, from the near end's west corner, by `depth` down from under the
  * coping): a band of pale blue tiles at the top, 15 cm, grout gone black, some cracked, some fallen off and the grey
  * adhesive showing; under it the white render gone grey — rings of grime where the water stood for years at different
- * levels, green slime just over the water, mould where it is damp, streaks run down from the tiles, patches where the
- * render has come away, hairline cracks; under the water, slime. `water`: how far down the water is.
+ * levels, green slime just over the water, black mould spots, streaks run down from the tiles, patches where the render
+ * has come away; under the water, slime. `water`: how far down the water is.
  */
 export function poolWallTex(len, depth, water, marks = [], seed = 5151) {
-  const S = 300, W = Math.min(8192, Math.round(len * S)), Hh = Math.round(depth * S), r = mulberry32(seed), L = lattice(seed); // (300 a metre: a break in the render holds up at half a metre)
+  const S = 220, W = Math.min(8192, Math.round(len * S)), Hh = Math.round(depth * S), r = mulberry32(seed), L = lattice(seed);
   return canvasTex(W, Hh, (g, w, h) => {
     const sx = w / len, sy = h / depth, TILE = 0.15, band = TILE, wy = water * sy;
     perPixel(g, w, h, (u, v, px, py) => {
@@ -7108,126 +7130,21 @@ export function poolWallTex(len, depth, water, marks = [], seed = 5151) {
       const dark = THREE.MathUtils.smoothstep(y, band + 0.1, water) * 0.25; // darker down to the water
       return c.map((ch) => ch * (1 - dark));
     });
-    // streaks run down from the tiles, dark, where the rain off the coping goes: in runs where it comes over, a few
-    // together, each its own width, wavering, splitting, thinning out as it goes (user, 2026-11-03: straight bars, all
-    // alike, were part of what read as made by a machine)
-    for (let i = 0; i < len * 9; i++) for (let k = 0; k < 5; k++) r(); // (the old ones' dice, thrown and left: the tiles stay as they were)
-    {
-      const rs = mulberry32(seed + 55);
-      for (let i = 0; i < len * 2.2; i++) {
-        const x0 = rs() * w, rust = rs() < 0.25, n = 1 + Math.floor(rs() ** 1.5 * 5), spread = (0.01 + rs() * 0.05) * sx;
-        for (let k = 0; k < n; k++) {
-          let x = x0 + (rs() - 0.5) * spread, wd = (0.003 + rs() ** 2 * 0.02) * sx;
-          const l = (0.04 + rs() ** 1.4 * 0.4) * sy, a0 = 0.12 + rs() * 0.28, ph = rs() * 6, y0 = band * sy - 1;
-          const left = [], right = [];
-          for (let y = 0; y <= l; y += 3) {
-            const t = y / l, wob = Math.sin(y * 0.05 + ph) * 1.4 + Math.sin(y * 0.17 + ph * 2) * 0.6;
-            const half = wd * 0.5 * (1 - t) ** 0.7 * (0.75 + 0.5 * Math.abs(Math.sin(y * 0.09 + ph)));
-            left.push([x + wob - half, y0 + y]); right.push([x + wob + half, y0 + y]);
-          }
-          const gr = g.createLinearGradient(0, y0, 0, y0 + l);
-          gr.addColorStop(0, `rgba(${rust ? '92,72,42' : '42,42,34'},${a0})`); gr.addColorStop(0.6, `rgba(${rust ? '92,72,42' : '42,42,34'},${a0 * 0.45})`); gr.addColorStop(1, 'rgba(42,42,34,0)');
-          g.fillStyle = gr;
-          g.beginPath(); [...left, ...right.reverse()].forEach(([px, py], j) => (j ? g.lineTo(px, py) : g.moveTo(px, py))); g.closePath(); g.fill();
-        }
-      }
+    // streaks run down from the tiles, dark, where the rain off the coping goes
+    for (let i = 0; i < len * 9; i++) {
+      const x = r() * w, y0 = band * sy, l = (0.05 + r() * 0.4) * sy, gr = g.createLinearGradient(0, y0, 0, y0 + l);
+      gr.addColorStop(0, `rgba(${r() < 0.3 ? '86,70,40' : '40,40,34'},${0.25 + r() * 0.3})`); gr.addColorStop(1, 'rgba(40,40,34,0)');
+      g.fillStyle = gr; g.fillRect(x, y0, 1 + r() * 5, l);
     }
-    // (the dice the old patches and mould spots took, thrown and left, so the tiles after them stay as they were)
-    for (let i = 0; i < len * 3; i++) for (let k = 0; k < 25; k++) r();
-    for (let i = 0; i < len * 40; i++) { r(); r(); for (let k = 0, m = 3 + Math.floor(r() * 12); k < m; k++) { r(); r(); r(); r(); } }
-    // Where it is damp: just over the water, where it stood for years, and under the tiles, where the rain off the
-    // coping runs down; a little anywhere, in patches
-    const damp = (x, y) => Math.max(1 - THREE.MathUtils.smoothstep(Math.abs(y - water + 0.07), 0.0, 0.2), 0.45 * (1 - THREE.MathUtils.smoothstep(y - band, 0.0, 0.13))) * (0.55 + 0.9 * pfbm(L, x / 8 + 0.7, y / 8, 40, 40, 2));
-    // The render come away, each patch its own (user, 2026-11-03: the old ones, a blob with a pale ring, read as made by
-    // a machine): the finish coat flaked off showing the grey scratch coat under it, and in some, deeper, the concrete;
-    // a ragged edge, a step down as thick as the render, its shadow under the upper lip and the broken edge catching
-    // the light at the lower; hairline cracks running off it; a little dirt washed down out of it. Most under the tiles
-    // and where the water stood, where frost and the wet get in; a few anywhere.
-    const rp = mulberry32(seed + 77);
-    const outline = (cx, cy, rx, ry) => { // a ragged loop round cx, cy (pixels): broad lobes, and the small steps of a break
-      const N = 84, a2 = 0.16 + rp() * 0.14, a3 = 0.08 + rp() * 0.12, a5 = 0.04 + rp() * 0.07, a9 = 0.02 + rp() * 0.04, p = [rp(), rp(), rp(), rp()].map((v) => v * 6.28), pts = [];
-      let e = 0;
-      for (let k = 0; k < N; k++) {
-        const a = (k / N) * Math.PI * 2;
-        e = e * 0.55 + (rp() - 0.5) * 0.13;
-        const q = Math.max(0.35, 1 + a2 * Math.sin(2 * a + p[0]) + a3 * Math.sin(3 * a + p[1]) + a5 * Math.sin(5 * a + p[2]) + a9 * Math.sin(9 * a + p[3]) + e);
-        pts.push([cx + Math.cos(a) * rx * q, cy + Math.sin(a) * ry * q]);
-      }
-      return pts;
-    };
-    const trace = (pts, dx = 0, dy = 0) => { g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy))); g.closePath(); };
-    const grains = (pts, n, cols, rMax) => { // sand or stones in what shows, in the patch's box
-      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-      for (let k = 0; k < n; k++) { g.fillStyle = cols[Math.floor(rp() * cols.length)]; g.beginPath(); g.arc(x0 + rp() * (x1 - x0), y0 + rp() * (y1 - y0), 0.4 + rp() ** 2 * rMax, 0, Math.PI * 2); g.fill(); }
-    };
-    const layer = (pts, fill, sand, deep, slime) => { // what shows where a layer has come off, its edges
-      const ys = pts.map((p) => p[1]), xs = pts.map((p) => p[0]), top = Math.min(...ys), bottom = Math.max(...ys), left = Math.min(...xs), right = Math.max(...xs);
-      g.save();
-      trace(pts);
-      g.clip();
-      g.fillStyle = fill; g.fill();
-      for (let k = 0, n = 5 + Math.floor(rp() * 8); k < n; k++) { // never one flat colour: blotched lighter and darker
-        g.fillStyle = rp() < 0.5 ? `rgba(60,58,48,${0.08 + rp() * 0.12})` : `rgba(190,186,172,${0.06 + rp() * 0.1})`;
-        const br = (0.2 + rp() * 0.35) * (right - left);
-        g.beginPath(); g.ellipse(left + rp() * (right - left), top + rp() * (bottom - top), br, br * (0.4 + rp() * 0.4), rp() * 3, 0, Math.PI * 2); g.fill();
-      }
-      grains(pts, Math.min(900, Math.round((bottom - top) * (right - left) * 0.35)), sand, deep ? 1.6 : 0.8);
-      if (slime > 0.05) { g.fillStyle = `rgba(40,58,20,${0.5 * slime})`; g.fillRect(left, top, right - left, bottom - top); }
-      const wet = g.createLinearGradient(0, top, 0, bottom); // (damper, dirtier low down in it, where the wet sits)
-      wet.addColorStop(0, 'rgba(40,42,30,0)'); wet.addColorStop(1, `rgba(40,42,30,${0.16 + rp() * 0.14})`);
-      g.fillStyle = wet; g.fillRect(0, top, w, bottom - top);
-      g.lineJoin = 'round';
-      g.strokeStyle = `rgba(30,28,24,${deep ? 0.75 : 0.6})`; g.lineWidth = deep ? 5 : 3.6; trace(pts, 0, deep ? 2.4 : 1.8); g.stroke(); // the shadow under its upper lip
-      g.strokeStyle = 'rgba(214,210,198,0.28)'; g.lineWidth = 1.6; trace(pts, 0, -1.4); g.stroke(); // its lower lip, broken clean, catching the light
-      g.restore();
-    };
-    for (let i = 0; i < len * 2.6; i++) {
-      const zone = rp(), x = rp() * w;
-      const y = (zone < 0.4 ? band + 0.008 + rp() * 0.07 : zone < 0.8 ? water - 0.03 - rp() * 0.15 : band + rp() * (water - band)) * sy;
-      const rx = (0.018 + rp() ** 1.7 * 0.14) * sx, ry = rx * (0.32 + rp() * 0.45);
-      const outer = outline(x, y, rx, ry);
-      const sc = 128 + rp() * 18, slime = 1 - THREE.MathUtils.smoothstep(Math.abs(y / sy - water + 0.06), 0, 0.12); // (in the slime band, slimed over like the rest of it)
-      layer(outer, `rgb(${Math.round(sc + 4)},${Math.round(sc + 1)},${Math.round(sc - 8)})`, ['rgba(96,92,82,0.5)', 'rgba(170,166,154,0.4)', 'rgba(118,112,94,0.4)'], false, slime);
-      if (rp() < 0.5 && rx > 0.03 * sx) { // deeper in it, down to the concrete
-        const k = 0.35 + rp() * 0.3, inner = outline(x + (rp() - 0.5) * rx * 0.5, y + (rp() - 0.2) * ry * 0.4, rx * k, ry * k * (0.8 + rp() * 0.3)), cc = 98 + rp() * 18;
-        layer(inner, `rgb(${Math.round(cc + 6)},${Math.round(cc)},${Math.round(cc - 12)})`, ['rgba(60,54,44,0.6)', 'rgba(150,144,130,0.5)', 'rgba(126,112,88,0.5)', 'rgba(44,40,34,0.6)'], true, slime);
-      }
-      for (let c = 0, n = Math.floor(rp() * 3.4); c < n; c++) { // hairline cracks off it, mostly along the wall
-        const [sx0, sy0] = outer[Math.floor(rp() * outer.length)];
-        const dir0 = (rp() < 0.5 ? 0 : Math.PI) + (rp() - 0.5) * 1.1;
-        let cx = sx0, cy = sy0, dir = dir0;
-        g.strokeStyle = `rgba(58,56,48,${0.3 + rp() * 0.25})`; g.lineWidth = 0.7 + rp() * 0.4;
-        g.beginPath(); g.moveTo(cx, cy);
-        for (let s = 0, l = (0.03 + rp() * 0.09) * sx; s < l; s += 4) { dir = dir0 + (dir - dir0) * 0.6 + (rp() - 0.5) * 0.9; cx += Math.cos(dir) * 4; cy += Math.sin(dir) * 4; g.lineTo(cx, cy); } // (straight on the whole, jagged in its steps)
-        g.stroke();
-      }
-      if (y < wy - ry) { // dirt washed down out of it
-        const yb = y + ry * 0.8, l = (0.02 + rp() * 0.07) * sy, gr = g.createLinearGradient(0, yb, 0, yb + l);
-        gr.addColorStop(0, `rgba(58,56,40,${0.1 + rp() * 0.1})`); gr.addColorStop(1, 'rgba(58,56,40,0)');
-        g.fillStyle = gr; g.fillRect(x - rx * (0.15 + rp() * 0.3), yb, rx * (0.3 + rp() * 0.4), l);
-      }
+    for (let i = 0; i < len * 3; i++) { // render come away: grey-brown concrete under it, a lighter rim
+      const x = r() * w, y = band * sy + r() * (wy - band * sy), rx = (0.03 + r() * 0.12) * sx, ry = rx * (0.4 + r() * 0.6);
+      g.fillStyle = 'rgba(214,210,198,0.5)'; g.beginPath(); g.ellipse(x, y, rx + 2, ry + 2, r(), 0, Math.PI * 2); g.fill();
+      g.fillStyle = `rgba(${118 + r() * 20},${112 + r() * 16},${98 + r() * 12},0.95)`;
+      g.beginPath(); for (let k = 0; k <= 16; k++) { const a = (k / 16) * Math.PI * 2, q = 0.75 + r() * 0.35; k ? g.lineTo(x + Math.cos(a) * rx * q, y + Math.sin(a) * ry * q) : g.moveTo(x + rx * q, y); } g.fill();
     }
-    for (let i = 0; i < len * 0.8; i++) { // a few long hairline cracks across the render, by themselves
-      const dir0 = (rp() < 0.5 ? 0 : Math.PI) + (rp() - 0.5) * 0.6;
-      let cx = rp() * w, cy = (band + 0.03 + rp() * (water - band - 0.05)) * sy, dir = dir0;
-      g.strokeStyle = `rgba(62,60,52,${0.22 + rp() * 0.2})`; g.lineWidth = 0.6 + rp() * 0.3;
-      g.beginPath(); g.moveTo(cx, cy);
-      for (let s = 0, l = (0.08 + rp() * 0.3) * sx; s < l; s += 4) { dir = dir0 + (dir - dir0) * 0.6 + (rp() - 0.5) * 0.8; cx += Math.cos(dir) * 4; cy += Math.sin(dir) * 4; g.lineTo(cx, cy); }
-      g.stroke();
-    }
-    // Mould: colonies where it is damp, most of them a dusting of specks too small to make out one by one, thickest at
-    // their middle, a few bigger spots among them, a faint stain where they crowd; hardly any where it stays dry
-    const rm = mulberry32(seed + 91);
-    for (let i = 0; i < len * 30; i++) {
-      const xm = rm() * len, ym = band + rm() * (water + 0.02 - band);
-      if (rm() > damp(xm, ym) * 0.85 + 0.05) continue;
-      const R = (0.01 + rm() ** 1.6 * 0.06) * sx, cx = xm * sx, cy = ym * sy, n = Math.min(160, Math.round(8 + (R * R) * 0.12 * (0.5 + rm())));
-      if (R > 0.02 * sx) { const st = g.createRadialGradient(cx, cy, 0, cx, cy, R * 0.75); st.addColorStop(0, `rgba(30,32,26,${0.1 + rm() * 0.14})`); st.addColorStop(1, 'rgba(30,32,26,0)'); g.fillStyle = st; g.beginPath(); g.ellipse(cx, cy, R * 0.75, R * 0.55, 0, 0, Math.PI * 2); g.fill(); }
-      for (let k = 0; k < n; k++) {
-        const a = rm() * Math.PI * 2, d = Math.sqrt(-2 * Math.log(1 - rm() * 0.999)) * R * 0.42, big = rm() < 0.04;
-        g.fillStyle = `rgba(24,26,22,${(0.2 + rm() * 0.45) * (1 - Math.min(0.7, d / R * 0.5))})`;
-        g.beginPath(); g.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.75, big ? 0.9 + rm() * 1.1 : 0.3 + rm() ** 2 * 0.7, 0, Math.PI * 2); g.fill();
-      }
+    for (let i = 0; i < len * 40; i++) { // mould: black spots, in clusters
+      const x = r() * w, y = band * sy + (r() ** 0.6) * (wy - band * sy);
+      for (let k = 0, m = 3 + Math.floor(r() * 12); k < m; k++) { g.fillStyle = `rgba(28,30,24,${0.25 + r() * 0.5})`; g.beginPath(); g.arc(x + (r() - 0.5) * 30, y + (r() - 0.5) * 16, 0.6 + r() * 2.4, 0, Math.PI * 2); g.fill(); }
     }
     for (const [mu, my] of marks) { // under a fitting in the wall (`marks`: [metres round, metres down]): rust run down from it
       const x = mu * sx, y = my * sy, gr = g.createLinearGradient(0, y, 0, y + 0.3 * sy);

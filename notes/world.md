@@ -54,9 +54,30 @@ Read the part you need before touching any of these things, and keep it up to da
   trunks, root heaps on some sides only, patchy drifts against the fence → a mound mesh (ground texture,
   casts shadow) plus ~instanced curled dead leaves (`deadLeavesTex` atlas) lying on its surface. Never
   floating: every leaf sits on `heapAt()`.
-- **Grass** (`longGrass`): short, uneven, mown; long only where the mower can't reach (fence, shed, trunks);
-  each tuft coloured from the ground picture under it; in the wood only rare short tufts and a few tall ones
-  by the fence. He judges grass hard: no dark contrasty tufts, nothing even or repeated.
+- **Grass** (`longGrass`): short, uneven, mown; long only where the mower can't reach (fence, shed, trunks, the
+  porch's skirt); each tuft coloured from the ground picture under it; in the wood only rare short tufts and a few
+  tall ones by the fence. He judges grass hard: no dark contrasty tufts, nothing even or repeated.
+  2026-11-03 ("the grass mustn't stop where the porch starts… the same at the fence, on a little way and fading"):
+  it goes on in under the porch, thinner and leggier, gone by ~40 cm (`underDeck` cuts the light from all round
+  under the deck, for the lawn, tufts and weeds); and past the lawn's west and east fences 30–40 cm, thinning (own
+  dice `rf`; each no wider than reaches 4 cm back through the boards). 14 of the pool's weeds (`weedTex`) among the
+  longest tufts, ≥ 0.9 m apart, coloured from the lawn. All of it after the yard's dice: nothing else moved.
+  Short grass (2026-11-03/04, not yet judged): `shortGrass`, built last in `backYard`, own dice. Every blade its own
+  strip of geometry (a 1 m square of 3 000 at random, `InstancedMesh` per square, each square turned/flipped its own
+  way; root, middle and tip decided in the vertex shader). He turned down, in order: 15–30 cm card strips ("lines laid
+  in a cross"), 5–8 cm card clumps ("you keep putting lines of grass: I want a simple, well-made carpet"), and a
+  layered (shell) carpet 5.5 cm high ("only in a circle round me, too low"). The short star-shaped tufts out on the
+  lawn are gone (`gone` in longGrass: tall < 0.12 m, out of the wood; dice still thrown); the long ones kept. Blades
+  4–10 cm, mown at uneven heights, each leaning its own way; near (to 4.5 m) all, further one in three, wider, the rest
+  shrinking away first; from 8.5 m down into the ground, which `carpetUnder` colours as the grass looks from there (no
+  edge). Each frame `update(eye)` picks the squares in view (house.update passes the eye). Thickness/height every 5 cm
+  (`lie`, it ignores the eaves' dry strip: grass right up to the steps and round the cellar, as he asked), colour from
+  the lawn's picture with its dirt turned green (`tint`). `free`, 1 cm: where a blade may stand (keepOff, colliders but
+  the fence's and the porch deck's, the skirt bands, `FENCE_POSTS`, poles +1 cm, the torch, the east downpipe's shoe,
+  every litter leaf to its corners, the heaps' mound squares). Checked: 0 of 6.2 M points of everything up to 10.5 cm
+  on a free spot. Brightness measured: 92–93 % of the old lawn. Cost: the soft shadows on the blades were 4.5 ms; their
+  shadow is looked up once (`#undef SHADOWMAP_TYPE_PCF_SOFT`) and they have no `dappled`: ~2–3 ms looking across the
+  lawn, 1–2 from the porch (GPU timer, pane hidden). Cards, shells and ray-marched shells all cost more (6–11 ms).
 - **The hose** never goes into anything (2026-10-18): it lies on `ground(x, z)` (leaf heaps, sand, every
   root), goes over low boxes and round the rest (`hose: false` for colliders it ignores; `extra` hose-only
   shapes: sandbox boards, the ladder, `capsule`s for the swing's and the slide's leaning legs, `trunk`s — each
@@ -106,6 +127,8 @@ Read the part you need before touching any of these things, and keep it up to da
   there, on the treads and in a few scattered spots (deck shader: `aWear` = [scuffed, rubbed]). Treads dented,
   chipped and nicked all over. `wornWood` options: `round`, `ends`, `wob`, `nicks`, `chips`, `marks`, `dentK`,
   `gnaw`, `deck`/`tread`, `broken`, `damp`, `lean`, `rot`, `step` (see its comment). The deck is ~250k vertices.
+  Under it, black (`darkUnder`): from 30 cm up just behind the skirt, all the way down from 45 cm in, so the lawn
+  shows a little way in through the skirt's gaps (2026-11-03; it had been black 4 cm behind the boards: a line).
   The hose's tap and coil are on the house wall right of the back door (over the porch); the cellar doors on the
   wall beside the porch, east of it; the east downpipe runs down to the lawn.
 - **The bedroom window from the yard**: its sash and blind belong to the bedroom's scene, lit by the bedroom's own
@@ -178,6 +201,13 @@ Read the part you need before touching any of these things, and keep it up to da
 - **Pool**: long side across the yard, 8.2 × 4.2 m inside, west end a full half-round ("it was perfect like that"), east end square. Worked out in its own frame, turned a quarter
   (`POOL.at`, `toYard`, `sdPool`/`sdLocal`). Water opaque, level −0.55. Colliders stop you on the coping (walked at from 72 directions: ≥ 11 cm off the water).
   In it `DROWNED`: a flamingo's head and a bit of neck, tilted, mouldy, the eye on the house's side gone (`drownedFlamingo`, yard.js).
+  Wall `poolWallTex` as approved: his "too AI" note on its worn patches got a redo (layered spalls, cracks, mould by the damp, wavy streaks) that he
+  turned down: "put it back exactly as it was" — it is, dice and all (2026-11-03).
+  **Bubbles** (`poolBubbles`, 2026-11-03): now and then a few from six places on the bottom. Under the surface a soft green blur (an `alphaMap`, lit
+  like the water), on it a light-green film for a moment (part metal so the sky in it is tinted; alpha by Fresnel: whole, it read "as a pea"), darker
+  on his second note. No drawn ring: where one comes up and where it bursts the water itself ripples (`poolRipples`, the surface's shader, up to 8 at
+  once: rings 3.4–6 cm apart going out at 0.22 m/s, uneven round, gone in ~2 s, smoothed out where finer than a few pixels — from ~4 m at a slant
+  they hardly show).
 - **Paving**: rows of setts (`settGeo`, instanced), up against the coping (cut narrower or shorter, never a row left off); some gone, 7.5% broken, each its own (`brokenStones`).
   Puddles are see-through (`puddleTex`), not black. Fading out of the leaves `paved`/`litter`. Leaves are never mirrored in instancing: lit from the wrong side they go black.
 - **Table and chairs**: `TABLE` (−3.5, −16.86), nine rows of paving nearer the house than first; a chair each side and one on the house's side, knocked over (his sketch); iron bars only, no seat boards.
