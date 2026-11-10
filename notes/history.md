@@ -330,3 +330,47 @@ and the current state; `notes/world.md` the approved state of the yard and the h
 - Copying the canvas after an `await` gives black (the picture is already handed over): step one frame right before
   `drawImage`, as `grid()` does. To judge something small at play distance, crop the full-size canvas round its
   projected point instead of zooming the camera.
+
+## Speed for players (2026-11-05)
+
+- Players complained it lagged and froze their browsers. On the M2 the page was frozen ~21 s building (textures drawn,
+  boards cut) and then ~10 s more in the first frame compiling 127 shaders one by one (each waited for). Now the build
+  stops every second or two (`breathe`), the shaders are compiled side by side before the first frame
+  (`KHR_parallel_shader_compile` via `compileAsync`), and their uniforms are fetched then too (asked in the first
+  frame, behind every shadow map, each question waited ~10 ms). Ready in ~22 s instead of ~45 s in the preview,
+  never frozen more than ~2 s at a time. The noise's sines were a third of the texture time: cached per cell.
+- In the yard the M2 is bound by the ~2000 draw calls a frame (the browser's GPU process), not by pixels: a quarter
+  of the resolution saves ~10 ms of ~37. Sending uniform arrays only when changed cut the main thread's GL calls but
+  not the frame time there (measured on/off in the same page). Fewer draw calls (merging) is what would help next.
+- Mum's body had the bathroom's water patch (17 textures, one over the limit: a warning every frame): `noWater`.
+
+## Speed for players, again (2026-11-09 → 10; round 1 of 5 for `versions.md`)
+
+- "People still struggle: it lags and takes too long to load. I don't want to lose quality, or the way I work." All
+  of it kept to what gives the same picture, and nothing baked or compressed: the game still draws itself from the
+  code at every load, so nothing in how it is edited changes.
+- Measured first, with a profile of the load and the GPU's own timer per frame (`tools/measure-server.py`). The lag:
+  on the M2 indoors the GPU took 28–39 ms a frame with only 300–1400 draws — the pixels, each working out all 15 of
+  the house's lamps. A depth pass first gave nothing here (Apple's GPU already skips hidden surfaces), and the
+  shadows' lookups are only ~15 % of it. What helped: skipping a lamp whole where it gives nothing (corridor
+  28 → 19.5 ms, kitchen 39 → 27, living room 32.5 → 20). From the yard, looking at the house: every room's contents
+  were drawn behind its walls, and the bedroom's glow shadow (~500 draws) was redrawn every frame because Luna
+  "moved" in the living room: 2325 → 1665 draws (1180 with Luna still), 25.7 → 21.7 ms. Looking away from the
+  house nothing changed (18.5 ms).
+- The loading: the build is spread thin (no single culprit left: `bleed` was 1.6 s for nothing, the "slow" tree
+  limbs were the bark being drawn). A first visit also compiles 214 shaders, ~11 s, at the very end, and on a slow
+  line waited up to 8 s more for Mum and the angel, asked for only 10–12 s in. Sent for at the start and the
+  shaders begun as soon as the world is built: 31.9 → 23.3 s on a first visit over a simulated 20 Mbit line;
+  ~1 s on a fast one; a later visit ~15 s as before.
+- Lessons. Two loads of the game are not the same picture: the rug's weave (and ~25 small textures) use
+  `Math.random`, and the hatch's lamp has fits — compare with `?seeded` and the lamp pinned, or a real difference
+  and these can't be told apart (an hour lost thinking the lamp shortcut was inexact). The browser's console keeps
+  warnings from earlier loads: count errors in the page (`?gltrace`), not there. A margin "the eye is in the
+  doorway" must be by the doorway, not anywhere along its wall's line (from the lawn it switched the hiding off).
+  `listUnseen` waited 120 frames before its first look: nothing was hidden for the first two seconds.
+- Then (his go-ahead): the rooms' shaders begun before the yard is built, lit by stand-in lamps (a shader is made
+  for a count of lamps of each kind), each material given the bathroom's water patch then instead of at the end:
+  a first visit 25.9 → 20.6 s on the M2. Checked by the text of every shader against the old order's, under the same
+  key: 214 the same, 2 extra. Lesson: the bedroom's, begun before `twoFills` had changed the shared lighting chunk,
+  kept the old chunk under the same key — 14 stale shaders, found only by comparing texts; "which shader a material
+  has now" is not comparable between two loads (shared materials), the set of all programs by key is.

@@ -11,14 +11,15 @@ import { Desktop } from './pc.js';
 import { Sound } from './audio.js';
 import { makeInventory } from './inventory.js';
 import { uvBeam, UV_TORCH } from './uvtorch.js';
-import { buildHouse } from './house.js';
+import { buildHouse, HOUSE_LAMPS } from './house.js';
 import { TORCH } from './basement.js';
 import { DAY } from './daytime.js';
-import { shadowTwin, shadowOnly } from './build.js';
+import { shadowTwin, shadowOnly, countLamps, standIns, beginShaders as beginEarly, lampsAsSaid } from './build.js';
 import { lunaBoat } from './boat.js';
 import { bubbles } from './bubbles.js';
 import { buildZelpa } from './zelpa.js';
-import { deg } from './util.js';
+import { deg, breathe, built, arrivals } from './util.js';
+import { lighten } from './lighten.js';
 
 // Every shadow looked up on the surface itself (`centroid`): at the edge of a surface seen side-on — a wall at a corner,
 // the top of the corridor's rail — the picture's samples worked its point out past the end of it, out through the
@@ -26,7 +27,8 @@ import { deg } from './util.js';
 // coming and going as you moved (user, 2026-11-03). The more so the smaller the window.
 for (const k of ['shadowmap_pars_vertex', 'shadowmap_pars_fragment']) THREE.ShaderChunk[k] = THREE.ShaderChunk[k].replaceAll('varying vec4 v', 'centroid varying vec4 v');
 const params = new URLSearchParams(location.search);
-const SHOT = params.has('shot'); // clean frame for comparing against the reference photo
+const SHOT = params.has('shot');
+const HEAVY = params.has('heavy'); // (the textures left as drawn, nothing let go of: for comparing against — lighten.js) // clean frame for comparing against the reference photo
 
 // Where the reference photo was taken from: just inside the door, looking north-west.
 const START = { x: 3.3, z: 3.72, yaw: 33, pitch: -12 };
@@ -34,7 +36,7 @@ const START = { x: 3.3, z: 3.72, yaw: 33, pitch: -12 };
 const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 renderer.localClippingEnabled = true; // Luna in her boat (cat.clip)
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); // (and less when the frames come slowly: sharpen())
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false; // the room is static; re-render shadows only when something moves
@@ -88,8 +90,15 @@ const blind = buildWindow(scene, M);
 }
 const door = buildDoor(scene, M, ctx.colliders);
 buildProps(scene, M, ctx);
+// The bedroom's shaders, begun early, for the graphics card to get on with while the page builds the house and the yard
+// (build.js). Its lamps as they will be: the room's own and the UV torch's beam, which comes with the house. Not
+// before the house has set the lighting code every shader shares (`twoFills`: begun before it, 14 of them kept the
+// code as it was, under the same name): house.js calls this back as soon as it has.
+const ROOM_LAMPS = { hemi: 1, rect: 0, dir: [0, 0], point: [0, 4], spot: [2, 1] };
+ctx.sharedShaderCodeSet = () => beginEarly(renderer, scene, standIns(scene, ROOM_LAMPS, countLamps(scene)));
 // the rest of the house and the yard: a scene of its own, with its own lamps (house.js)
-const house = buildHouse(renderer, M, ctx);
+await breathe(0.05);
+const house = await buildHouse(renderer, M, ctx);
 for (const pane of blind.glass) house.scene.add(pane); // the window's glass, drawn after the yard it is in front of (room.js)
 
 let shadowsDirty = 3;
@@ -246,11 +255,11 @@ const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(4, 4, 
 // against the same depth, so each shows only where nothing of the other stands in front of it.
 // Each scene has its own lamps and its own shadow maps, redrawn when its own things move.
 let roomShadowsDue = true;
-const roomPass = { scene, shadowsDue: () => roomShadowsDue, enabled: true };
-const housePass = { scene: house.scene, shadowsDue: () => house.shadowsDue(), enabled: true, hide: () => hideUnseen() };
+const roomPass = { scene, shadowsDue: () => roomShadowsDue, enabled: true, hide: () => hideUnseen('room') };
+const housePass = { scene: house.scene, shadowsDue: () => house.shadowsDue(), enabled: true, hide: () => hideUnseen('list') };
 // and under the house, the basement (basement.js): drawn only when it can be seen; from down there the house and the
 // bedroom only when the cellar's open doors are in view
-const cellarPass = { scene: house.cellar.scene, shadowsDue: () => house.cellar.shadowsDue(), enabled: true };
+const cellarPass = { scene: house.cellar.scene, shadowsDue: () => house.cellar.shadowsDue(), enabled: true, hide: () => hideUnseen('cellar') };
 class ScenesPass extends Pass {
   constructor(list) {
     super();
@@ -706,6 +715,7 @@ const STAR_GLOW = 2.0;
 const clock = new THREE.Clock();
 let frame = 0;
 let sunOwed = true, glowOwed = true; // the bedroom's two shadows, wanting drawing as soon as it can be seen
+let calm = 0, glowWait = 0; // seconds since anything in the bedroom changed; since its glow's shadow was last drawn
 
 /**
  * Whether anything of the bedroom can be seen: from in it, always; from anywhere else only through its door and its
@@ -728,74 +738,157 @@ function bedroomSeen() {
 }
 
 /**
- * And the other way round: from inside the bedroom the rest of the house and the yard can only be seen through its
- * window and its door, so what lies outside both, as seen from your eye, is left out of the house's picture (the
- * porch, most of the trees, the kitchen and Mum: two million triangles drawn behind the walls). Not out of its
- * shadows: shown again before they are drawn (`renderer.shadowMap.render`, below). Only meshes with nothing hung on
- * them, and not ones three is told never to leave out (they move about in ways their bounds don't follow).
+ * And the other way round: what no straight line from the eye can reach is left out of the picture. The house is rooms
+ * (the bedroom, the bathroom, the corridor, the kitchen and living room) and the gaps between them and out of doors
+ * (`GAPS`: doorways, windows, the corridor's open end, the attic's hatch). Two rules:
+ *  - from inside a room, the rest of the house and the yard can only be seen through that room's gaps out: what lies
+ *    outside them all, as seen from the eye, is left out (from the bedroom: the porch, most of the trees, the kitchen
+ *    and Mum — two million triangles drawn behind the walls);
+ *  - what stands wholly inside another room can only be seen through that room's gaps in, wherever the eye is (from
+ *    the lawn, looking at the house, every room's furniture was drawn behind its walls: ~1,300 of the frame's 2,400
+ *    draws — players, 2026-11-09: "it lags").
+ * A door that is shut is no way through (the bedroom's, the bathroom's: plain leaves; the back door is glazed, so it
+ * always is one). Both scenes, the bedroom's too. Not out of the shadows: shown again before they are drawn
+ * (`renderer.shadowMap.render`, below). Only meshes with nothing hung on them, and not ones three is told never to
+ * leave out (they move about in ways their bounds don't follow). A new opening in a wall goes in `GAPS` and in the
+ * `ROOMS` it joins, or what is seen through it disappears. `?seeall`: nothing is left out (for comparing against).
  */
-const GAPS = [
-  [[ROOM.win.x0, ROOM.win.y0, 0], [ROOM.win.x1, ROOM.win.y0, 0], [ROOM.win.x1, ROOM.win.y1, 0], [ROOM.win.x0, ROOM.win.y1, 0]],
-  [[ROOM.door.x0, 0, ROOM.D], [ROOM.door.x1, 0, ROOM.D], [ROOM.door.x1, ROOM.door.h, ROOM.D], [ROOM.door.x0, ROOM.door.h, ROOM.D]],
-].map((q) => q.map((p) => new THREE.Vector3(...p)));
-const AROUND = new THREE.Box3(new THREE.Vector3(-0.3, -1, -0.3), new THREE.Vector3(ROOM.W + 0.3, ROOM.H + 0.6, ROOM.D + 0.3)); // (what is in the bedroom itself, its glass)
-// and the same from inside the bathroom, its door the only gap, and only while it stands open (user, 2026-11-03: "is
-// anything out of sight weighing on the game while the water runs?" — door shut, looking back up the room or at a side
-// wall: the house and the yard behind its walls, 2,600 draws and 8 million triangles a frame, for nothing)
-const BATH = house.bathroom, BATH_H = 2.05;
-const BATH_GAP = [[BATH.door.x0, 0, BATH.z0], [BATH.door.x1, 0, BATH.z0], [BATH.door.x1, BATH_H, BATH.z0], [BATH.door.x0, BATH_H, BATH.z0]].map((p) => new THREE.Vector3(...p));
+const BATH = house.bathroom, BATH_H = 2.05, OPEN = house.openings, HALL = OPEN.corridor, LIV = OPEN.living;
+/** A gap in a wall, by its four corners (a little wider than the hole: its frame); `open()`: whether the eye gets through it now. */
+const gap = (pts, open = null) => {
+  const q = pts.map((p) => new THREE.Vector3(...p)), mid = q.reduce((m, p) => m.addScaledVector(p, 0.25), new THREE.Vector3());
+  for (const p of q) p.add(p.clone().sub(mid).normalize().multiplyScalar(0.1));
+  return { q, mid, reach: q[0].distanceTo(mid) + 0.5, open, planes: Array.from({ length: 5 }, () => new THREE.Plane()), on: true, near: 0, by: false };
+};
+const acrossZ = (z, x0, x1, y0, y1, open) => gap([[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]], open);
+const acrossX = (x, z0, z1, y0, y1, open) => gap([[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]], open);
+const GAPS = {
+  window: acrossZ(0, ROOM.win.x0, ROOM.win.x1, ROOM.win.y0, ROOM.win.y1),
+  door: acrossZ(ROOM.D, ROOM.door.x0, ROOM.door.x1, 0, ROOM.door.h, () => Math.abs(door.state.angle) > 0.003),
+  bath: acrossZ(BATH.z0, BATH.door.x0, BATH.door.x1, 0, BATH_H, () => Math.abs(house.bathDoor.state.angle) > 0.003),
+  hallEnd: acrossX(HALL.x0, HALL.z0, HALL.z1, 0, ROOM.H), // (the corridor runs straight into the living room: no wall, no door)
+  hatch: gap([[OPEN.hatch.x0, ROOM.H, OPEN.hatch.z0], [OPEN.hatch.x1, ROOM.H, OPEN.hatch.z0], [OPEN.hatch.x1, ROOM.H, OPEN.hatch.z1], [OPEN.hatch.x0, ROOM.H, OPEN.hatch.z1]]),
+  kitchenWin: acrossZ(0, OPEN.kitchenWin.x0, OPEN.kitchenWin.x1, OPEN.kitchenWin.y0, OPEN.kitchenWin.y1),
+  back: acrossZ(0, OPEN.back.x0, OPEN.back.x1, 0, OPEN.doorH), // (glazed: seen through shut as well)
+  front: acrossX(LIV.x0, OPEN.front.z0, OPEN.front.z1, 0, OPEN.doorH),
+  livingWin: acrossX(LIV.x0, OPEN.livingWin.z0, OPEN.livingWin.z1, OPEN.livingWin.y0, OPEN.livingWin.y1),
+  cellar: gap(house.cellar.mouth), // (the storm doors' opening in the lawn: the only way to see down into the basement)
+};
+const EVERY_GAP = Object.values(GAPS);
+/**
+ * A room by its inside faces: `inside(eye)`; `around`: what is in the room itself, its glass (never left out from in
+ * it); `within`: what stands wholly in it (against its walls, on its floor, under its ceiling); its `gaps` in and out.
+ */
+const room = (x0, x1, z0, z1, gaps, floor = 0) => ({
+  inside: (e) => e.x > x0 + 0.05 && e.x < x1 - 0.05 && e.z > z0 + 0.05 && e.z < z1 - 0.05 && e.y > floor && e.y < ROOM.H,
+  around: new THREE.Box3(new THREE.Vector3(x0 - 0.3, -1, z0 - 0.3), new THREE.Vector3(x1 + 0.3, ROOM.H + 0.6, z1 + 0.3)),
+  within: new THREE.Box3(new THREE.Vector3(x0 - 0.03, -0.03, z0 - 0.03), new THREE.Vector3(x1 + 0.03, ROOM.H + 0.03, z1 + 0.03)),
+  gaps,
+});
+// (the bathroom's door the only way into it, and only while it stands open — user, 2026-11-03: "is anything out of
+// sight weighing on the game while the water runs?": door shut, the house and the yard behind its walls, 2,600 draws
+// and 8 million triangles a frame, for nothing)
 const ROOMS = [
-  { inside: (e) => e.x > 0.05 && e.x < ROOM.W - 0.05 && e.z > 0.05 && e.z < ROOM.D - 0.05 && e.y > 0 && e.y < ROOM.H, around: AROUND, gaps: () => GAPS },
-  {
-    inside: (e) => e.x > BATH.x0 + 0.05 && e.x < BATH.x1 - 0.05 && e.z > BATH.z0 + 0.05 && e.z < BATH.z1 - 0.05 && e.y > -0.5 && e.y < ROOM.H,
-    around: new THREE.Box3(new THREE.Vector3(BATH.x0 - 0.3, -1, BATH.z0 - 0.3), new THREE.Vector3(BATH.x1 + 0.3, ROOM.H + 0.6, BATH.z1 + 0.3)),
-    gaps: () => (house.bathDoor.state.angle > 0.003 ? [BATH_GAP] : []),
-  },
+  room(0, ROOM.W, 0, ROOM.D, [GAPS.window, GAPS.door]),
+  room(BATH.x0, BATH.x1, BATH.z0, BATH.z1, [GAPS.bath], -0.5),
+  room(HALL.x0, HALL.x1, HALL.z0, HALL.z1, [GAPS.door, GAPS.bath, GAPS.hallEnd, GAPS.hatch]),
+  room(LIV.x0, LIV.x1, LIV.z0, LIV.z1, [GAPS.hallEnd, GAPS.kitchenWin, GAPS.back, GAPS.front, GAPS.livingWin]),
 ];
-const throughGaps = GAPS.map(() => Array.from({ length: 5 }, () => new THREE.Plane()));
-const unseen = { list: [], at: -1, off: [] }, ball = new THREE.Sphere(), mid = new THREE.Vector3();
-function hideUnseen() {
-  const eye = camera.position, room = ROOMS.find((r) => r.inside(eye));
-  if (!room) return;
-  const gaps = room.gaps(), around = room.around;
-  listUnseen();
-  // the four sides of each gap, as seen from the eye, and the gap's own face
-  gaps.forEach((q, k) => {
-    const planes = throughGaps[k];
-    mid.set(0, 0, 0);
-    for (const p of q) mid.add(p);
-    mid.multiplyScalar(0.25);
-    q.forEach((p, i) => {
-      planes[i].setFromCoplanarPoints(eye, p, q[(i + 1) % 4]);
-      if (planes[i].distanceToPoint(mid) < 0) planes[i].negate();
-    });
-    planes[4].setFromCoplanarPoints(q[0], q[1], q[2]);
-    if (planes[4].distanceToPoint(eye) > 0) planes[4].negate();
-  });
-  for (const o of unseen.list) {
-    if (!o.visible) continue;
-    // (a crowd of copies, or Mum with her bones: bounds of their own; anything else its shape's)
-    if (o.isInstancedMesh || o.isSkinnedMesh) {
-      if (o.boundingSphere === null) o.computeBoundingSphere();
-      ball.copy(o.boundingSphere);
-    } else {
-      if (o.geometry.boundingSphere === null) o.geometry.computeBoundingSphere();
-      ball.copy(o.geometry.boundingSphere);
+// and the basement, a scene of its own: from above ground, what of it lies under the ground is seen only down through
+// its doors' opening (from the lawn all of it was drawn, 130 draws, for the dark between the doors' boards)
+const UNDERGROUND = [{ within: new THREE.Box3(new THREE.Vector3(-Infinity, -Infinity, -Infinity), new THREE.Vector3(Infinity, house.cellar.mouth[0][1] + 0.03, Infinity)), gaps: [GAPS.cellar] }];
+const unseen = { list: [], room: [], cellar: [], at: -1000, off: [], aimed: -1, all: params.has('seeall') }, ball = new THREE.Sphere();
+/** Each gap as seen from the eye: its four sides and its own face, the far side of it the side that counts. */
+function aim(eye) {
+  if (unseen.aimed === frame) return;
+  unseen.aimed = frame;
+  for (const w of EVERY_GAP) {
+    w.on = !w.open || w.open();
+    if (!w.on) continue;
+    const q = w.q, planes = w.planes;
+    for (let i = 0; i < 4; i++) {
+      planes[i].setFromCoplanarPoints(eye, q[i], q[(i + 1) % 4]);
+      if (planes[i].distanceToPoint(w.mid) < 0) planes[i].negate();
     }
-    ball.applyMatrix4(o.matrixWorld);
-    ball.radius += 0.25; // (anything moving may have gone a little further since its matrix was last worked out)
-    if (around.intersectsSphere(ball)) continue;
-    if (gaps.some((q, k) => throughGaps[k].every((pl) => pl.distanceToPoint(ball.center) >= -ball.radius))) continue;
-    o.visible = false;
-    unseen.off.push(o);
+    planes[4].setFromCoplanarPoints(q[0], q[1], q[2]);
+    const d = planes[4].distanceToPoint(eye);
+    if (d > 0) planes[4].negate();
+    // (the eye in the gap itself, in the thickness of the wall: it has no sides then, everything either side of it may
+    // be seen — near its face and by it, not just anywhere along the line of that wall)
+    w.near = Math.abs(d);
+    w.by = eye.distanceTo(w.mid) < w.reach;
+  }
+}
+/** Whether any of `gaps` lets the eye reach the ball `s`; within `near` of a gap's own face and by it, the eye is taken to be in it. */
+function seenThrough(gaps, s, near) {
+  for (let k = 0; k < gaps.length; k++) {
+    const w = gaps[k];
+    if (!w.on) continue;
+    if (w.by && w.near < near) return true;
+    const p = w.planes, c = s.center, r = -s.radius;
+    if (p[0].distanceToPoint(c) >= r && p[1].distanceToPoint(c) >= r && p[2].distanceToPoint(c) >= r && p[3].distanceToPoint(c) >= r && p[4].distanceToPoint(c) >= r) return true;
+  }
+  return false;
+}
+/**
+ * A mesh's bounds in the world, a little more, and the room it stands wholly in (or none): worked out again only when
+ * it has moved (a crowd of copies, or one with bones — Mum, Luna: bounds of their own, looked at every time).
+ */
+const kept = new WeakMap(), KEY = [0, 1, 2, 5, 6, 10, 12, 13, 14], wide = new THREE.Box3();
+function where(o, rooms) {
+  let k = kept.get(o);
+  if (!k) kept.set(o, (k = { ball: new THREE.Sphere(), room: null, key: new Float64Array(KEY.length).fill(NaN), geo: null, r: -1 }));
+  const e = o.matrixWorld.elements, own = o.isInstancedMesh || o.isSkinnedMesh, from = own ? o : o.geometry;
+  if (from.boundingSphere === null) from.computeBoundingSphere();
+  let same = !own && k.geo === o.geometry && k.r === from.boundingSphere.radius;
+  for (let i = 0; same && i < KEY.length; i++) same = k.key[i] === e[KEY[i]];
+  if (same) return k;
+  for (let i = 0; i < KEY.length; i++) k.key[i] = e[KEY[i]];
+  k.geo = o.geometry;
+  k.r = from.boundingSphere.radius;
+  k.ball.copy(from.boundingSphere).applyMatrix4(o.matrixWorld);
+  const c = k.ball.center;
+  if (o.isSkinnedMesh) {
+    // (her ball is far bigger than she is: in a room if its middle is well inside it — she stands on its floor)
+    k.room = rooms.find((r) => c.x > r.within.min.x + 0.25 && c.x < r.within.max.x - 0.25 && c.z > r.within.min.z + 0.25 && c.z < r.within.max.z - 0.25) ?? null;
+  } else {
+    if (own) wide.min.copy(c).addScalar(-k.ball.radius), wide.max.copy(c).addScalar(k.ball.radius);
+    else {
+      if (o.geometry.boundingBox === null) o.geometry.computeBoundingBox();
+      wide.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+    }
+    k.room = rooms.find((r) => r.within.containsBox(wide)) ?? null;
+  }
+  k.ball.radius += 0.25; // (anything moving may have gone a little further since its matrix was last worked out)
+  return k;
+}
+/** Leaves out of `which` scene's picture ('list': the house and the yard; 'room': the bedroom; 'cellar': the basement) what the eye can't reach. */
+function hideUnseen(which) {
+  if (unseen.all) return;
+  const eye = camera.position, here = ROOMS.find((r) => r.inside(eye)) ?? null;
+  if (which === 'room' && here === ROOMS[0]) return; // (in the bedroom: all of it)
+  if (which === 'cellar' && house.cellar.below(eye)) return; // (down in it: all of it)
+  listUnseen();
+  aim(eye);
+  const list = unseen[which], rooms = which === 'cellar' ? UNDERGROUND : ROOMS;
+  for (let i = 0; i < list.length; i++) {
+    const o = list[i];
+    if (!o.visible) continue;
+    const k = where(o, rooms), s = k.ball;
+    if ((here && !here.around.intersectsSphere(s) && !seenThrough(here.gaps, s, 0.02)) || (k.room && k.room !== here && !seenThrough(k.room.gaps, s, 0.25))) {
+      o.visible = false;
+      unseen.off.push(o);
+    }
   }
 }
 /** What there is to leave out, looked over every few seconds (Mum came after the house). */
 function listUnseen() {
   if (frame - unseen.at <= 120) return;
   unseen.at = frame;
-  unseen.list.length = 0;
+  unseen.list.length = unseen.room.length = unseen.cellar.length = 0;
   house.scene.traverse((o) => { if (o.isMesh && o.frustumCulled && !o.children.length) unseen.list.push(o); });
+  scene.traverse((o) => { if (o.isMesh && o.frustumCulled && !o.children.length) unseen.room.push(o); });
+  house.cellar.scene.traverse((o) => { if (o.isMesh && o.frustumCulled && !o.children.length) unseen.cellar.push(o); });
 }
 /** Its bounds in the world, a little more (`ball`). */
 function boundsOf(o) {
@@ -871,7 +964,39 @@ function wade(dt) {
   else if (was[2] && player.grounded && inIt && was[1] < -0.8) B.disturb(x, z, Math.min(2.5, -was[1] * 0.9), 0.14);
 }
 
+// ---------------------------------------------------------------- how sharp the picture is drawn
+// As sharp as ever (up to 1.5 screen pixels a pixel) while the frames come quickly enough; when they don't, a step less
+// sharp at a time, and only as long as that helps: where the time goes on the scene's shapes rather than on its pixels a
+// softer picture buys nothing, and it goes back (2026-11-05: on players' machines the game lagged). Never in ?shot.
+const SHARP = Math.min(devicePixelRatio, 1.5);
+const sharp = { scale: SHARP, low: Math.min(SHARP, 0.6), times: [], last: 0, tried: null, hold: 0, from: Infinity };
+function sharpen(now) {
+  if (SHOT || document.hidden) return void (sharp.last = 0);
+  if (sharp.from === Infinity) sharp.from = now + 4000; // (not the first seconds: every shadow being drawn)
+  if (sharp.last) sharp.times.push(now - sharp.last);
+  sharp.last = now;
+  if (sharp.times.length < 45) return;
+  const ms = sharp.times.sort((a, b) => a - b)[22]; // (the middle one: a hitch now and then is not the machine)
+  sharp.times.length = 0;
+  if (now < sharp.from) return;
+  let to = sharp.scale;
+  if (sharp.tried) { // the last step down: did it help?
+    if (ms > sharp.tried.ms * 0.92) { to = sharp.tried.scale; sharp.hold = now + 45000; }
+    sharp.tried = null;
+  } else if (ms > 34 && sharp.scale > sharp.low && now > sharp.hold) {
+    sharp.tried = { scale: sharp.scale, ms };
+    to = Math.max(sharp.low, sharp.scale * 0.85);
+  } else if (ms < 21 && sharp.scale < SHARP) to = Math.min(SHARP, sharp.scale * 1.12);
+  if (to !== sharp.scale) {
+    sharp.scale = to;
+    renderer.setPixelRatio(to);
+    resize();
+  }
+}
+
 function tick() {
+  sharpen(performance.now());
+  if (frame % 30 === 0) keepProgramArrays(); // (any compiled since)
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
   frame++;
@@ -970,9 +1095,16 @@ function tick() {
   const sunTurn = bedroomInView && (sunOwed || (shadowsDirty > 0 && frame % 2 === 0));
   const moving = stirring > 0;
   if (moving && (stirring -= dt) <= 0) shadowsDirty = 3;
-  if (catMoved || moving || frame % 8 === 0) glowOwed = true;
+  // The window-glow's shadow follows whatever moves in the bedroom — Luna only while she is in it: walking about the
+  // living room she "moved", and it was drawn again every frame, the whole bedroom, ~500 draws, nothing in it changed
+  // (players, 2026-11-09: "it lags") — and is looked at again every 8th frame for a few seconds after anything has
+  // changed, then every few seconds (in case something moved unannounced): not 7 times a second for good.
+  const stirred = (catMoved && cat.root.parent === scene) || moving;
+  calm = stirred || shadowsDirty > 0 || sunOwed ? 0 : calm + dt;
+  glowWait += dt;
+  if (stirred || (calm < 3 ? frame % 8 === 0 : glowWait >= 4)) glowOwed = true;
   const glowTurn = bedroomInView && (sunOwed || (!sunTurn && glowOwed));
-  if (glowTurn) glowOwed = false;
+  if (glowTurn) { glowOwed = false; glowWait = 0; }
   if (sunTurn) {
     shadowsDirty--;
     sunOwed = false;
@@ -1010,10 +1142,85 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+/**
+ * Three sends a material's arrays of numbers to the GPU again every time it switches to that material, changed or not —
+ * the lamps' shadow matrices, `uDry` — ~2000 times a frame looking at the house from the yard: 60 % of the frame on the
+ * M2 (2026-11-05, players' complaints of lag). Each program now keeps what it was last sent and is sent only what has
+ * changed, as three does already for single values. (A program's uniforms keep their values on the GPU between draws.)
+ */
+const ARRAY_SETTERS = { setValueM4Array: 16, setValueV4fArray: 4, setValueV3fArray: 3, setValueV2fArray: 2, setValueV1fArray: 1 };
+const keptPrograms = new WeakSet();
+function keepArrays(u) {
+  const send = u.setValue, k = ARRAY_SETTERS[send.name], n = u.size * k, sent = new Float32Array(n), now = new Float32Array(n);
+  let primed = false;
+  u.unkept = send; // (to measure against)
+  u.setValue = function (gl, v, textures) {
+    if (typeof v[0] === 'number') for (let i = 0, m = Math.min(n, v.length); i < m; i++) now[i] = v[i];
+    else for (let i = 0, m = Math.min(u.size, v.length); i < m; i++) v[i].toArray(now, i * k);
+    if (primed) {
+      let i = 0;
+      while (i < n && sent[i] === now[i]) i++;
+      if (i === n) return;
+    }
+    send.call(this, gl, v, textures);
+    sent.set(now);
+    primed = true;
+  };
+}
+function keepProgramArrays() {
+  const walk = (seq) => { for (const u of seq) if (u.seq) walk(u.seq); else if (u.size && ARRAY_SETTERS[u.setValue.name]) keepArrays(u); };
+  for (const p of renderer.info.programs) {
+    if (keptPrograms.has(p) || !p.isReady()) continue; // (not yet compiled: asking for its uniforms would wait for it)
+    keptPrograms.add(p);
+    walk(p.getUniforms().seq);
+  }
+}
+
+/**
+ * Every shader the game draws with, compiled before the first frame and side by side, while the loading line shows
+ * (2026-11-05, players' complaints: compiled one by one as each thing first came into view, the first frames held the
+ * page ~10 s on an M2 and far longer elsewhere). As they are drawn: into the shared picture (no tone mapping: the grade
+ * pass does it), each scene with its own lamps; Luna also as she will be in the house and in the TV's game.
+ */
+/** Has the graphics card make the shaders of every world (what is made already is found made); resolves when all are ready. */
+function beginShaders() {
+  renderer.setRenderTarget(picture.rt);
+  const jobs = [[scene], [house.scene], [house.cellar.scene], [zelpa.scene], [cat.root, house.scene], [cat.root, zelpa.scene]];
+  const ready = Promise.all(jobs.map(([what, lit]) => renderer.compileAsync(what, camera, lit ?? null)));
+  renderer.setRenderTarget(null);
+  return ready;
+}
+async function prepareShaders() {
+  await breathe(0.9);
+  await beginShaders(); // (again: those of what came since — Mum, the angel — and the wait for them all)
+  // and what three asks of each the first time it is used (its log, its uniforms: questions the page waits on the GPU
+  // to answer — asked during the first frame, behind every shadow map, they held it ~2 s)
+  const programs = renderer.info.programs;
+  for (let i = 0; i < programs.length; i++) {
+    programs[i].getUniforms();
+    programs[i].getAttributes();
+    if (i % 40 === 39) await breathe(0.9 + (0.1 * i) / programs.length);
+  }
+  keepProgramArrays();
+}
+
+built(); // (Mum and the angel, whenever they come)
+// The shaders, begun now and not waited for: the graphics card gets on with them while Mum and the angel are still on
+// their way over the network and the textures are lightened, where before it only began after both (on a first visit
+// the shaders take ~11 s of their own — players, 2026-11-09: "too long to load"; later visits find them kept by the
+// browser). Only once every lamp is in its scene: a shader is made for the lamps there are.
+beginShaders().catch(() => {});
+lampsAsSaid(scene, ROOM_LAMPS, 'the bedroom');
+lampsAsSaid(house.scene, HOUSE_LAMPS, 'the house');
+await Promise.race([Promise.all(arrivals), new Promise((r) => setTimeout(r, 8000))]); // (here in time: compiled with the rest)
+const WORLDS = [scene, house.scene, house.cellar.scene, zelpa.scene];
+const lightened = HEAVY ? null : await lighten(renderer, WORLDS, { progress: 0.88 }); // (the same pictures, lighter: lighten.js)
+await prepareShaders();
 statusEl.textContent = '';
+startBtn.disabled = false;
 if (SHOT) startEl.hidden = true; // camera stays parked on the reference pose
 requestAnimationFrame(tick);
 
 // handles for tuning from the console
 window.GAME = { THREE, scene, camera, renderer, composer, passes: { room: roomPass, house: housePass, cellar: cellarPass }, player, cat, boat, desktop, sound, inventory, sit: setSeated, stars: ctx.stars, lights, blind, door, bloom, grade, M, ROOM, START,
-  reshadow: () => { shadowsDirty = 3; }, zelpa, house, colliders: ctx.colliders, tv: ctx.tv, warpTo: startWarp, world: () => world };
+  reshadow: () => { shadowsDirty = 3; }, sharp, unseen, lightened, lighten: (o) => lighten(renderer, WORLDS, o), zelpa, house, colliders: ctx.colliders, tv: ctx.tv, warpTo: startWarp, world: () => world };

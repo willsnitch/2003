@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import * as T from './textures.js';
 import { ROOM } from './room.js';
-import { cyl, deg, mulberry32, fbm, canvasTex } from './util.js';
+import { cyl, deg, mulberry32, fbm, canvasTex, breathe } from './util.js';
 import { metric, slab, flat, pierced, inPieces } from './build.js';
 import { DAY, AFTERNOON } from './daytime.js';
 import { gardenHose } from './hose.js';
@@ -109,7 +109,7 @@ function bareness(x, z, eaves = true) { // (eaves: with the dry strip along the 
   return Math.min(1, b);
 }
 
-export function backYard(g, M, mat, ctx, scene, plan) {
+export async function backYard(g, M, mat, ctx, scene, plan) {
   YF = plan.yard;
   Y = { ...YF, z0: END }; // (user, 2026-10-29: the garden longer again, the pool past the wood — what was built to the old fence stays as it was; 2026-11-01: wider there, to x2)
   ({ y: OY, z: OZ } = plan.offset ?? { y: 0, z: 0 });
@@ -123,6 +123,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
 
   // ---- the ground: one picture of the whole yard, then long grass standing up out of it where it grows
   const ground = std({ map: T.yardGroundTex(Y, bareness, woodland, needleFall), roughness: 1 });
+  await breathe(0.35);
   // (with a hole where the sandbox is: its sand goes on down into a pit, to be dug into: user, 2026-10-18)
   const lawnShape = new THREE.Shape([new THREE.Vector2(Y.x0, -Y.z0), new THREE.Vector2(Y.x1, -Y.z0), new THREE.Vector2(Y.x1, -Y.z1), new THREE.Vector2(Y.x0, -Y.z1)]);
   const SBX = SANDBOX, pit = new THREE.Path([new THREE.Vector2(SBX.x0 + SBX.board, -(SBX.z0 + SBX.board)), new THREE.Vector2(SBX.x0 + SBX.board, -(SBX.z1 - SBX.board)), new THREE.Vector2(SBX.x1 - SBX.board, -(SBX.z1 - SBX.board)), new THREE.Vector2(SBX.x1 - SBX.board, -(SBX.z0 + SBX.board))]);
@@ -142,6 +143,7 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   for (const [x0, x1, z0, z1] of [[-70, 70, -70, YF.z0], [-70, Y.x0, YF.z0, -t], [-70, Y.x0, -t, 30], [YF.x2, 70, YF.z0, END], [Y.x1, 70, END, -t + PORCH]]) g.add(flat(x0, x1, z0, z1, -0.005, out)); // (the last on along the porch's end to the house)
   longGrass(g, r, ground.map.image);
   const heapAt = leafHeaps(g, mulberry32(313), ground);
+  await breathe(0.4);
   dappled(ground); // (the sun's spots on it move with the leaves; after the heaps took their copy)
   underDeck(ground); // (the dark in under the porch)
 
@@ -196,7 +198,9 @@ export function backYard(g, M, mat, ctx, scene, plan) {
   // the doormat outside the back door: coir, brown, no words on it (user, 2026-10-18: it was a grey slab), a
   // little off the middle and askew, as it was last kicked
   // ---- the porch along the back of the house, the steps down from it (porch(); the doormat is up on it now)
-  porch(g, M, mat, ctx);
+  await breathe(0.43);
+  await porch(g, M, mat, ctx);
+  await breathe(0.55);
   const MW = 0.74, MD = 0.44, matX = (BACK.x0 + BACK.x1) / 2 + 0.06, matZ = -t + PORCH - 0.3;
   const coir = std({ map: T.coirMatTex(MW, MD), bumpMap: T.coirMatTex(MW, MD, true), bumpScale: 2.2, roughness: 1 });
   const edges = std({ color: 0x5e4c3a, roughness: 1 }); // (faded, dusty)
@@ -265,9 +269,12 @@ export function backYard(g, M, mat, ctx, scene, plan) {
     { x0: swing.box.x0, x1: swing.box.x1, z0: swing.box.z0, z1: swing.box.z1, top: 2.1, clear: true, tall: true }, // the swing (tall: nothing of the oak over it at all)
     ...FLAMINGOS.map(([x, z]) => ({ x0: x - 0.35, x1: x + 0.35, z0: z - 0.35, z1: z + 0.35, top: 1.05 })),
   ];
+  await breathe(0.6);
   const wood = grove(g, ctx, { yard: Y, wire, under });
+  await breathe(0.65);
   // ---- past the wood: the old paving, the iron table, the pool, the angel, the corner trees (pool.js)
-  const past = poolGarden(g, M, ctx, { yard: YF, wire: lines, lit: bothFacesLit, merge: mergeAll });
+  const past = await poolGarden(g, M, ctx, { yard: YF, wire: lines, lit: bothFacesLit, merge: mergeAll });
+  await breathe(0.75);
   // where the sun comes through the leaves onto the lawn, for its spots to move with them (grove.js dappled)
   WIND.ground.value = OY;
   leafLight(g, { x0: Y.x0, x1: Y.x1, z0: Y.z0, z1: Y.z1 }, [DAY.sun.dir, DAY.sky.dir], { x: 0, z: OZ });
@@ -1578,7 +1585,7 @@ export function wornWood(list, mat, r, rubbed = () => 0, scuff) {
  * five gnawed, one knocked askew; steps down to the lawn, a handrail each side ending on a short post. In this frame its front is
  * z = −t, the house wall behind it −t + PORCH; it runs from the yard's west edge to `PX1`.
  */
-function porch(g, M, mat, ctx) {
+async function porch(g, M, mat, ctx) {
   const zf = -t, zb = -t + PORCH, x0 = Y.x0, x1 = PX1, top = LIFT;
   const grain = T.oldTimberTex(), relief = T.oldTimberTex(true), scratched = T.oldTimberTex(false, true), scratchedRelief = T.oldTimberTex(true, true);
   // (the old timber's grey-brown, lifted to a light brown-beige — user, 2026-10-20; the texture is dark, so more than
@@ -1649,7 +1656,9 @@ function porch(g, M, mat, ctx) {
   // the second step down on its own, for the knot gone out of it (user, 2026-10-28: "move this hole a bit to the right and
   // make it better" — to the west, as he stood: a dent the dice had made in the middle of it, crumpled; now a knot hole)
   const knotStep = deck.findIndex((p) => p[6].knot), step2 = deck.splice(knotStep, 1);
+  await breathe(0.46);
   g.add(...inPieces(wornWood(deck, deckMat, r, walked, scuff), PIECE)); // (in pieces: drawn only where in view)
+  await breathe(0.49);
   const step2Mesh = wornWood(step2, deckMat, mulberry32(8787), walked, scuff);
   g.add(step2Mesh);
   projectDecal(step2Mesh, { at: [(sx0 + sx1) / 2 - 0.145, zf - 1.5 * RUN - 0.005 + 0.01], size: [0.125, 0.078], map: T.knotHoleTex(), lift: 0.0006, roughness: 0.95 });
@@ -1809,8 +1818,10 @@ function porch(g, M, mat, ctx) {
   }
   roughen(base);
   roughen(rest);
+  await breathe(0.51);
   g.add(...inPieces(wornWood(base, baseMat, mulberry32(8686)), PIECE));
   g.add(...inPieces(wornWood(rest, woodMat, r), PIECE));
+  await breathe(0.53);
   // the nails' heads, gone dark with rust
   const nailMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.003, 0.0033, 0.003, 7), std({ color: 0x3b332c, metalness: 0.45, roughness: 0.62 }), nails.length), m4 = new THREE.Matrix4(), qn = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   nails.forEach(([p, n], i) => nailMesh.setMatrixAt(i, m4.compose(p, qn.setFromUnitVectors(up, n), one)));

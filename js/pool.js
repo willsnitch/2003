@@ -7,9 +7,13 @@
 // of their crowns coming down over it. Damp, abandoned, quiet. Built in the yard's own frame (yard.js), after the grove.
 import * as THREE from 'three';
 import * as T from './textures.js';
-import { mulberry32, fbm } from './util.js';
+import { mulberry32, fbm, whenBuilt, arrive, breathe, fetchEarly } from './util.js';
 import { outsideTrees, leafCards } from './grove.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from './lib/meshopt_decoder.module.js'; // (the angel's shape packed without loss: tools/meshopt-pack.mjs; the unpacked original in assets/models/source)
+
+const ANGEL_FILE = 'assets/models/angel.glb';
+fetchEarly(ANGEL_FILE); // (sent for now, as the page starts: util.js)
 
 const S = THREE.MathUtils.smoothstep, clamp = THREE.MathUtils.clamp;
 const std = (o) => new THREE.MeshStandardMaterial(o);
@@ -78,7 +82,7 @@ function ring(off, step = 0.04) {
  * overhead (the corner trees keep off them); `lit(fn)`: how the yard lights a two-sided card (yard.js bothFacesLit);
  * `merge`: geometries into one. Pushes colliders to ctx. Returns what the hose and the checks need.
  */
-export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
+export async function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   const Y = yard, r = mulberry32(5401), XW = Y.x2 - Y.x0;
   const dist = (x, z, ax, az) => Math.hypot(x - ax, z - az);
   const angelBox = { x0: ANGEL.x - 0.5, x1: ANGEL.x + 0.55, z0: ANGEL.z - 0.95, z1: ANGEL.z + 0.95, top: 2.2 };
@@ -151,6 +155,7 @@ export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   }
 
   // ---- the stones, and what grows on them
+  await breathe(0.68);
   const mossNoise = T.mossNoiseTex();
   const stoneMap = T.pavingStoneTex();
   const setts = [[0.13, 0.12], [0.16, 0.125], [0.19, 0.13], [0.22, 0.13], [0.26, 0.135], [0.3, 0.14]].map(([l, d], i) => settGeo(l, d, 5300 + i)), WHOLE = setts.length;
@@ -249,6 +254,7 @@ export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   });
 
   // ---- the pool: its walls, its coping, its water
+  await breathe(0.7);
   const pool = buildPool(g, M, ctx, { moss, mossNoise, stoneMap, topAt, r: mulberry32(5501) });
 
   // ---- the iron table and its chairs, in the weeds
@@ -258,6 +264,7 @@ export function poolGarden(g, M, ctx, { yard, wire, lit, merge }) {
   const angel = marbleAngel(g, ctx);
 
   // ---- the trees outside the fence
+  await breathe(0.72);
   const trees = outsideTrees(g, ctx, { yard: Y, wire, under: [angelBox] });
 
   // ---- the bushes gone wild, all along the fence: tall and thick, no two alike, some big and some small, crowding
@@ -1211,7 +1218,7 @@ function marbleAngel(g, ctx) {
   g.add(figure);
   ctx.colliders.push({ type: 'box', x0: ANGEL.x - 0.31, x1: ANGEL.x + 0.31, z0: ANGEL.z - 0.34, z1: ANGEL.z + 0.34, hose: false }); // (the plinth, 0.64 × 0.57, turned; the wings start 1.6 m up)
   const api = { figure, moved: null };
-  new GLTFLoader().loadAsync('assets/models/angel.glb').then(({ scene }) => {
+  arrive(Promise.all([fetchEarly(ANGEL_FILE).then((bytes) => new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(bytes, 'assets/models/')), whenBuilt]).then(([{ scene }]) => {
     let src;
     scene.traverse((o) => { if (o.isMesh) src = o; });
     const m = figure.material, s = src.material;
@@ -1222,6 +1229,6 @@ function marbleAngel(g, ctx) {
     figure.geometry = src.geometry;
     api.verts = src.geometry.attributes.position.count;
     api.moved?.();
-  });
+  }));
   return api;
 }

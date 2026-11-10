@@ -14,8 +14,11 @@
 // knife back as it was and comes back to her place (ERRAND); her arms there are set bone by bone each frame (IK).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { mulberry32, deg } from './util.js';
+import { mulberry32, deg, whenBuilt, fetchEarly } from './util.js';
 import { carrotSkinTex, carrotCutTex, irisTex } from './textures.js';
+
+const HER_FILE = 'assets/models/mother.glb';
+fetchEarly(HER_FILE); // (sent for now, as the page starts: util.js)
 
 /**
  * Her arms, folded, in her own frame (metres; feet at 0, facing +z): how far each shoulder comes round forward
@@ -642,7 +645,7 @@ export function mother(g, ctx, x, z, look, sees, { board = null, moved = () => {
   };
   footprint(x, z, yaw);
   ctx.colliders.push(col);
-  return new GLTFLoader().loadAsync('assets/models/mother.glb').then(({ scene: her, animations }) => {
+  return Promise.all([fetchEarly(HER_FILE).then((bytes) => new GLTFLoader().parseAsync(bytes, 'assets/models/')), whenBuilt]).then(([{ scene: her, animations }]) => {
     const bones = {};
     let body = null;
     her.traverse((o) => {
@@ -696,6 +699,7 @@ export function mother(g, ctx, x, z, look, sees, { board = null, moved = () => {
     // (not its metalness picture: nothing on her is metal, and the shader had no room left for the eyes' — sixteen pictures
     // at most, and the house's shadows take half)
     body.material = new THREE.MeshStandardMaterial({ map: was.map, roughnessMap: was.roughnessMap, side: THREE.DoubleSide });
+    body.material.userData.noWater = true; // (not the bathroom's patch, bath.js: she is never in its water or its dark, and it took her to 17 pictures, one over the limit — a warning every frame, 2026-11-05)
     was.dispose();
     const skin = skinOf(body.geometry, body.material.map.image, body.skeleton.bones);
     mendSpecks(body.geometry, skin);

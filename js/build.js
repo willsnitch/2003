@@ -253,6 +253,62 @@ export function bakeStatic(root) {
   return { merged: meshes.length, into: groups.size };
 }
 
+// ---------------------------------------------------------------- shaders, begun early
+
+/** How many lamps of each kind `scene` has that shaders are made for: { hemi, rect, dir, point, spot }, the last three [shadowed, plain]. */
+export function countLamps(scene) {
+  const n = { hemi: 0, rect: 0, dir: [0, 0], point: [0, 0], spot: [0, 0] };
+  scene?.traverseVisible((o) => {
+    if (!o.isLight) return;
+    if (o.isHemisphereLight) n.hemi++;
+    else if (o.isRectAreaLight) n.rect++;
+    else if (o.isDirectionalLight) n.dir[o.castShadow ? 0 : 1]++;
+    else if (o.isPointLight) n.point[o.castShadow ? 0 : 1]++;
+    else if (o.isSpotLight) n.spot[o.castShadow ? 0 : 1]++;
+  });
+  return n;
+}
+
+/**
+ * A scene of nothing but lamps: as many of each kind as `scene` will have in the end (`lamps`, as `countLamps` gives
+ * them) less those it has now (`have`), and what shiny things reflect in it. A shader is made for a number of lamps
+ * of each kind, not for the lamps themselves: lit by these stand-ins (with the ones already there), a thing gets, now,
+ * the shader it will have when the scene is whole.
+ */
+export function standIns(scene, lamps, have = countLamps(null)) {
+  const lit = new THREE.Scene(), kinds = { dir: THREE.DirectionalLight, point: THREE.PointLight, spot: THREE.SpotLight };
+  lit.environment = scene.environment;
+  lit.fog = scene.fog;
+  const add = (Lamp, n, shadowed) => { for (let i = 0; i < n; i++) lit.add(Object.assign(new Lamp(), { castShadow: shadowed })); };
+  add(THREE.HemisphereLight, lamps.hemi - have.hemi, false);
+  add(THREE.RectAreaLight, lamps.rect - have.rect, false);
+  for (const k in kinds) for (const i of [0, 1]) add(kinds[k], lamps[k][i] - have[k][i], i === 0);
+  return lit;
+}
+
+/**
+ * Has the graphics card begin, now, on the shaders of everything under `what`, lit by `lit`'s lamps (and `what`'s
+ * own), without waiting for them: it gets on with them while the page builds the rest (a first visit spent ~11 s on
+ * shaders alone, after everything was built: players, 2026-11-09, "too long to load"). Made as for a picture the
+ * scenes are drawn into, not for the screen (other shaders). A wrong guess costs loading time, never the picture:
+ * what was begun is simply not what gets used.
+ */
+let asPictured = null, anyCamera = null;
+export function beginShaders(renderer, what, lit = what) {
+  asPictured ??= new THREE.WebGLRenderTarget(4, 4);
+  anyCamera ??= new THREE.PerspectiveCamera();
+  const target = renderer.getRenderTarget();
+  renderer.setRenderTarget(asPictured);
+  renderer.compileAsync(what, anyCamera, lit).catch(() => {});
+  renderer.setRenderTarget(target);
+}
+
+/** Says so in the console if `scene` hasn't the lamps its early shaders were begun for (a lamp added or taken away: change the count). */
+export function lampsAsSaid(scene, lamps, name) {
+  const have = JSON.stringify(countLamps(scene)), said = JSON.stringify(lamps);
+  if (have !== said) console.warn(`${name}: its shaders were begun early for ${said} lamps and it has ${have} — put the count right where it is given (loading time lost, nothing else)`);
+}
+
 // ---------------------------------------------------------------- out of doors
 
 /** The lighting code without the point, spot and area lights' parts (whether the include is still there or another patch has spelt it out). */
@@ -355,6 +411,18 @@ export function outdoorsOnly(root, rooms) {
   const calls = ['getPointLightInfo( pointLight, geometryPosition, directLight );', 'getSpotLightInfo( spotLight, geometryPosition, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );'];
   const chunk = THREE.ShaderChunk.lights_fragment_begin;
   if (calls.every((c) => chunk.split(c).length === 2)) THREE.ShaderChunk.lights_fragment_begin = calls.reduce((s, c) => s.replace(c, c + facing), chunk);
+}
+
+// And where a light gives a surface nothing — out of its reach, or the surface turned away from it — the surface's
+// whole answer to it (diffuse, shine, sheen) need not be worked out and multiplied by that nothing: indoors that is
+// most of the house's thirteen lamps at any one pixel, and the pixels are what the frame's time goes on (players,
+// 2026-11-09: "it lags"; the graphics card's time indoors down by a third). The same picture: only sums of zeros are
+// left out. `?alllamps`: every lamp worked out everywhere, as before (for comparing against).
+if (typeof location === 'undefined' || !location.search.includes('alllamps')) {
+  const call = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  if (chunk.split(call).length === 4) THREE.ShaderChunk.lights_fragment_begin = chunk.split(call).join(`if ( directLight.visible ) { ${call} }`);
+  else console.warn('lights_fragment_begin: not as expected, left as it is');
 }
 
 /**

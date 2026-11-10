@@ -12,10 +12,10 @@
 import * as THREE from 'three';
 import * as T from './textures.js';
 import { ROOM } from './room.js';
-import { box, boxMM, cyl, cable, deg, mulberry32, canvasTex, HOUSE_SUN } from './util.js';
+import { box, boxMM, cyl, cable, deg, mulberry32, canvasTex, HOUSE_SUN, breathe, arrive } from './util.js';
 import { curvedScreen, screenMat, takeable } from './props.js';
 import { glowMaterial, UV_TORCH } from './uvtorch.js';
-import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN } from './build.js';
+import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN, standIns, beginShaders } from './build.js';
 import { backYard } from './yard.js';
 import { WIND, dappleCuts } from './grove.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -53,6 +53,11 @@ const YARD_LIGHT = 1; // how bright the yard is to you out in it (0.72 from 2026
 const CEILING = 0xe4e8ec, BOUNCE = 0xfff4e6, HOME_GLOW = 0.15, HALL_GLOW = 0.12; // the ceilings' white, and their glow (ceilingMat)
 // the house stands on its foundation LIFT over the yard, and a porch PORCH deep runs along its back, the yard out
 // past it (user, 2026-10-20: "raise the house, make a porch; take nothing off the garden")
+// The house scene's lamps once it is whole, counted by kind ([shadowed, plain]: build.js countLamps). The rooms' shaders
+// are begun for these before the yard is built, while the lamps themselves are not made yet (`beginRoomShaders`). A
+// lamp added to the house's scene or taken out of it: change the number here (the console says if it is wrong; only
+// loading time is lost).
+export const HOUSE_LAMPS = { hemi: 2, rect: 2, dir: [2, 0], point: [5, 3], spot: [1, 2] };
 export const LIFT = 0.75, PORCH = 1.85; // (13 boards: four fewer than it was — user, 2026-10-20)
 const PORCH_X1 = -t; // it runs along the kitchen only, from the house's west corner to where the bedroom's wall begins (user, 2026-10-20)
 const EAVE = 2.52; // underside of the roof: just above the bedroom's ceiling, so the two never fight
@@ -84,8 +89,9 @@ function onWall(parent, a, b, face) {
   return g;
 }
 
-export function buildHouse(renderer, bedroomM, ctx) {
+export async function buildHouse(renderer, bedroomM, ctx) {
   twoFills(); // (one fill for indoors, one for out: build.js)
+  ctx.sharedShaderCodeSet?.(); // (the bedroom's shaders may be begun from here on: main.js)
   // the bedroom's whites are made for its own light. Out here white paint is everyday off-white and as
   // matt as eggshell, no whiter than the plates by the sink (user, 2026-10-15: "the white things in the
   // kitchen and living room look lit differently, too bright; only the plates work")
@@ -373,6 +379,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
   wallCollider(B.x0 - t, B.x1 + t, B.z1, B.z1 + t);
   g.add(flat(B.x0, B.x1, B.z0, B.z1, 0, mat.tileX));
   g.add(Object.assign(flat(B.x0 - IN, B.x1 + IN, B.z0 - IN, B.z1 + IN, H, mat.tileX, false), { castShadow: true }));
+  await breathe(0.1);
   const bath = bathroom(g, M, mat, ctx, cool);
 
   // ---------------------------------------------------------------- kitchen and living room
@@ -414,9 +421,12 @@ export function buildHouse(renderer, bedroomM, ctx) {
   windowIn(g, M, [KWIN.x0, -t / 2], [KWIN.x1, -t / 2], [0, 1], KWIN.y0, KWIN.y1);
   windowIn(g, M, [L.x0 - t / 2, LWIN.z0], [L.x0 - t / 2, LWIN.z1], [1, 0], LWIN.y0, LWIN.y1);
   const kit = kitchen(g, M, mat, ctx);
+  await breathe(0.13);
   livingRoom(g, M, mat, ctx);
+  await breathe(0.17);
   ceilingLamp(g, M, -2.7, 2.0, true); // the kitchen's, on
   ceilingLamp(g, M, -2.7, 6.8);
+  beginRoomShaders(renderer, scene, g, bath.water.volume); // (for the graphics card to get on with while the yard is built)
 
   // under every floor, something dark: where two floors meet, a crack must not open onto the sky below
   g.add(Object.assign(slab(L.x0 - t + 0.02, C.x1 + t - 0.02, -0.05, -0.002, -t + 0.02, B.z1 + t - 0.02, new THREE.MeshBasicMaterial({ color: 0x0a0705 })), { castShadow: false, receiveShadow: false })); // (inside the foundation's faces: on them it flickered against them, along the foot of the walls — user, 2026-10-20)
@@ -451,8 +461,9 @@ export function buildHouse(renderer, bedroomM, ctx) {
   const yctx = Object.create(ctx);
   yctx.colliders = { push: (...cs) => { for (const c of cs) ctx.colliders.push(shiftC(c)); }, filter: (f) => ctx.colliders.map(unshiftC).filter(f) };
   yctx.ladders = { push: (L) => ctx.ladders.push({ ...L, z: L.z - PORCH, top: L.top - LIFT, foot: -LIFT }) };
-  const yard = backYard(yg, M, mat, yctx, scene, { yard: { ...Y, z1: -t + PORCH }, backDoor: DOORS.back, frontDoor: DOORS.front, offset: { y: -LIFT, z: -PORCH }, porchX1: PORCH_X1 }); // (its lawn on up to the house's wall beside the porch)
+  const yard = await backYard(yg, M, mat, yctx, scene, { yard: { ...Y, z1: -t + PORCH }, backDoor: DOORS.back, frontDoor: DOORS.front, offset: { y: -LIFT, z: -PORCH }, porchX1: PORCH_X1 }); // (its lawn on up to the house's wall beside the porch)
   // the storm cellar's doors in the yard against the bedroom's wall, and the basement under the house (basement.js)
+  await breathe(0.8);
   const cellarWay = cellar(g, ctx, { lift: LIFT, redraw: (n) => mark([sun, sky], n), occluders });
 
   // ---------------------------------------------------------------- what never moves, merged
@@ -477,6 +488,7 @@ export function buildHouse(renderer, bedroomM, ctx) {
     if (!m || m.isMeshBasicMaterial || (m.emissive && m.emissive.getHex() && m.emissiveIntensity > 0)) return;
     if (inside(o.getWorldPosition(at))) o.receiveShadow = true;
   });
+  await breathe(0.85);
   splitOutdoor(g, [{ x0: L.x0, x1: W, z0: 0, z1: L.z1 }, { x0: -t, x1: C.x1, z0: D, z1: B.z1 }], t - 0.004); // (what is outside on a material the rooms use too: its own copy, lit as outside)
   bakeStatic(g);
   // out of doors only the sun, the sky and the open air light anything (build.js): the rooms, inside their walls
@@ -600,8 +612,8 @@ export function buildHouse(renderer, bedroomM, ctx) {
   // (as she moves, the lamp's shadow is drawn again for her alone, over the house's as it was kept: layeredShadow)
   let mum = null;
   layeredShadow(renderer, scene, kitchenLight, () => (mum ? [mum] : []));
-  mother(g, ctx, -1.45, 1.35, [-0.3, 4.9], (p) => p.y > 0.5 && p.x > L.x0 && p.x < L.x1 && p.z > L.z0 && p.z < L.z1,
-    { board: kit.board, moved: () => due.set(kitchenLight, Math.max(due.get(kitchenLight) ?? 0, 1)), renderer }).then((her) => { mum = her; mark(shadowed, 2); }); // (now and then off to the chopping board: the lamp's shadow of her drawn again as she goes)
+  arrive(mother(g, ctx, -1.45, 1.35, [-0.3, 4.9], (p) => p.y > 0.5 && p.x > L.x0 && p.x < L.x1 && p.z > L.z0 && p.z < L.z1,
+    { board: kit.board, moved: () => due.set(kitchenLight, Math.max(due.get(kitchenLight) ?? 0, 1)), renderer }).then((her) => { mum = her; mark(shadowed, 2); })); // (now and then off to the chopping board: the lamp's shadow of her drawn again as she goes)
   // the toilet's lid turns like a door does, and lets you know when it has
   const lid = bath.lid;
   lid.userData.door = { state: { angle: 0, target: 0 }, lights: bathLamps, apply() { lid.rotation.x = -this.state.angle; } }; // (down to begin with: user, 2026-10-20)
@@ -677,6 +689,8 @@ export function buildHouse(renderer, bedroomM, ctx) {
     bathroom: { ...B, bathFront: B.z1 - 0.76, door: DOORS.bath },
     /** The bathroom's door ({ state, seg }: it shuts behind you, main.js) and what its glaze reflects. */
     bathDoor: doors[1],
+    /** Every way the eye gets from one room into another or out of doors (main.js: what can't be seen through any of them is left out of the picture). */
+    openings: { corridor: C, living: L, back: DOORS.back, front: DOORS.front, kitchenWin: KWIN, livingWin: LWIN, hatch: HATCH, doorH: DOOR_H },
     bathEnv: cool,
     /** Things that move that you can't walk through, and that aren't in the colliders (Luna's paths would go round them): the open cabinet door. */
     extraColliders: [cabSeg, ...kit.fridge.segs],
@@ -1282,6 +1296,36 @@ function calendar(g, x, y, z) {
  * A patch on every material
  * with a mesh in the corridor: by where the pixel is, so shared ones are unchanged anywhere else.
  */
+/**
+ * The rooms are built and the yard is not: has the graphics card begin on the rooms' shaders now, to work on through
+ * the seconds the yard takes (they were only begun when everything was built, and a first visit then waited ~11 s for
+ * them: players, 2026-11-09). Only for what will not change before the end: materials on something indoors (as
+ * `outdoorsOnly` tells it) and not along the corridor (`corridorFill` gives those another shader yet), on plain meshes.
+ * Each gets now what the others get at the end — the bathroom's water patch (bath.js; the last thing done to it either
+ * way) — and is lit by stand-ins for the lamps to come (`HOUSE_LAMPS`). Whatever this guesses wrong is made again at
+ * the end, as before: time lost, not the picture.
+ */
+function beginRoomShaders(renderer, scene, g, volume) {
+  const rooms = [{ x0: L.x0, x1: W, z0: 0, z1: L.z1 }, { x0: -t, x1: C.x1, z0: D, z1: B.z1 }], box = new THREE.Box3(), uses = new Map();
+  g.updateMatrixWorld(true);
+  g.traverse((o) => {
+    if (!o.isMesh) return;
+    box.makeEmpty().expandByObject(o, false);
+    const indoors = rooms.some((r) => box.max.x > r.x0 + 0.02 && box.min.x < r.x1 - 0.02 && box.max.z > r.z0 + 0.02 && box.min.z < r.z1 - 0.02 && box.min.y < 2.51);
+    const hall = !(box.max.x < C.x0 || box.min.x > C.x1 + 0.3 || box.max.z < D - 0.005 || box.min.z > C.z1 + t);
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const u = uses.get(m) ?? uses.set(m, { indoors: false, hall: false, odd: false, geo: o.geometry }).get(m);
+      u.indoors ||= indoors;
+      u.hall ||= hall;
+      u.odd ||= !!(o.isInstancedMesh || o.isSkinnedMesh);
+    }
+  });
+  const early = standIns(scene, HOUSE_LAMPS);
+  for (const [m, u] of uses) if (u.indoors && !u.hall && !u.odd && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) early.add(new THREE.Mesh(u.geo, m));
+  volume.patch(early);
+  beginShaders(renderer, early);
+}
+
 function corridorFill(root) {
   const box = new THREE.Box3(), done = new Set();
   // (`centroid`: the point taken on the surface itself — at its edge, a wall or the rail's top seen side-on was worked

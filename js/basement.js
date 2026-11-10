@@ -563,6 +563,8 @@ export function cellar(g, ctx, { lift, redraw, occluders }) {
     TORCH,
     /** Whether the doors stand open. */
     get open() { return D.open; },
+    /** The doors' opening in the ground, by its corners: all the eye gets down into the cellar through from above (main.js: what can't be seen through it is left out). */
+    mouth: [[xa, G, zf], [xb, G, zf], [xb, G, C.z1], [xa, G, C.z1]],
     /** The ground here for someone whose feet are at `feet`, if the cellar has a say in it: its steps, its floor. */
     baseAt(x, z, feet) {
       if (D.open && inWell(x, z) && (z < C.z1 || feet < -0.9)) return G - THREE.MathUtils.clamp((z - zs) / (W1.z0 - zs), 0, 1) * (G - FL);

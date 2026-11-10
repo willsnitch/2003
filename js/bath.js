@@ -364,7 +364,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
   // the lamps' own light is the lamps' business. The water itself gets only this (`noVolume`).
   const patched = new WeakSet();
   const patchOne = (m) => {
-    if (patched.has(m) || !(m.isMeshStandardMaterial || m.isMeshBasicMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return;
+    if (patched.has(m) || m.userData.noWater || !(m.isMeshStandardMaterial || m.isMeshBasicMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return;
     patched.add(m);
     const before = m.onBeforeCompile, key = m.customProgramCacheKey();
     const side = ({ dry: '#define DRY_SIDE\n', wet: '#define WET_SIDE\n' }[m.userData.waterSide] ?? '') + (m.userData.noVolume ? '#define NO_TINT\n' : '');

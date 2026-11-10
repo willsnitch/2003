@@ -9,21 +9,24 @@ import { canvasTex, mulberry32, fbm } from './util.js';
  */
 function bleed(tex) {
   const c = tex.image, w = c.width, h = c.height, a = new Uint8ClampedArray(c.getContext('2d').getImageData(0, 0, w, h).data);
-  let filled = new Uint8Array(w * h), sum = [0, 0, 0], n = 0;
+  let filled = new Uint8Array(w * h), next = new Uint8Array(w * h), sum = [0, 0, 0], n = 0;
   for (let i = 0; i < w * h; i++) if (a[i * 4 + 3] > 0) { filled[i] = 1; if (a[i * 4 + 3] > 128) { sum[0] += a[i * 4]; sum[1] += a[i * 4 + 1]; sum[2] += a[i * 4 + 2]; n++; } }
+  // ten rings outwards, each clear pixel taking the mean of its neighbours coloured before this ring (the same numbers
+  // as when a list of the four was made for every pixel of every ring: that was 1.6 s of the loading, 2026-11-09)
   for (let pass = 0; pass < 10; pass++) {
-    const next = filled.slice();
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const i = y * w + x;
+    next.set(filled);
+    for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
       if (filled[i]) continue;
-      let k = 0, rr = 0, gg = 0, bb = 0;
-      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
-        if (j < 0 || !filled[j]) continue;
-        rr += a[j * 4]; gg += a[j * 4 + 1]; bb += a[j * 4 + 2]; k++;
-      }
+      let k = 0, rr = 0, gg = 0, bb = 0, j;
+      if (x > 0 && filled[(j = i - 1)]) { rr += a[j * 4]; gg += a[j * 4 + 1]; bb += a[j * 4 + 2]; k++; }
+      if (x < w - 1 && filled[(j = i + 1)]) { rr += a[j * 4]; gg += a[j * 4 + 1]; bb += a[j * 4 + 2]; k++; }
+      if (y > 0 && filled[(j = i - w)]) { rr += a[j * 4]; gg += a[j * 4 + 1]; bb += a[j * 4 + 2]; k++; }
+      if (y < h - 1 && filled[(j = i + w)]) { rr += a[j * 4]; gg += a[j * 4 + 1]; bb += a[j * 4 + 2]; k++; }
       if (k) { a[i * 4] = rr / k; a[i * 4 + 1] = gg / k; a[i * 4 + 2] = bb / k; next[i] = 1; }
     }
+    const was = filled;
     filled = next;
+    next = was;
   }
   for (let i = 0; i < w * h; i++) if (!filled[i]) { a[i * 4] = sum[0] / n; a[i * 4 + 1] = sum[1] / n; a[i * 4 + 2] = sum[2] / n; }
   const rows = new Uint8Array(a.length); // bottom row first, as a canvas texture's flipY has it
@@ -1024,6 +1027,7 @@ export function tvScreenTex() {
     };
     img.src = 'assets/tv-title.webp';
   });
+  tex.userData.redraws = true; // (drawn again when the picture comes: its canvas stays)
   return tex;
 }
 
@@ -1080,6 +1084,7 @@ export function pencilCaseTex() {
     };
     img.src = 'assets/pencil-case-side.jpg';
   });
+  tex.userData.redraws = true; // (drawn again when the picture comes: its canvas stays)
   return tex;
 }
 
@@ -5123,6 +5128,7 @@ export function calendarTex() {
     g.strokeStyle = 'rgba(120,100,70,0.5)'; g.lineWidth = 2; g.beginPath(); g.arc(w / 2, 22, 9, Math.PI * 0.15, Math.PI * 0.85); g.stroke(); // torn a little at its lip
   };
   const picture = canvasTex(600, 600, (g, w, h) => drawPicture(g, w, h, null));
+  picture.userData.redraws = true; // (drawn again when the photo comes: its canvas stays)
   const photo = new Image();
   photo.onload = () => { const c = picture.image; drawPicture(c.getContext('2d'), c.width, c.height, photo); picture.needsUpdate = true; };
   photo.src = 'assets/calendar-photo.jpg';

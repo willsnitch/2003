@@ -23,13 +23,21 @@ function hash3(x, y, z) {
 const smooth = (t) => t * t * (3 - 2 * t);
 const mix = (a, b, t) => a + (b - a) * t;
 
+// A cell's eight corner values, kept: the textures and the yard's maps ask for the same cells over and over, and
+// the sines were a third of the time spent drawing them (2026-11-05, load time). Same numbers as worked out afresh.
+const CELLS = 1 << 14, cellKey = new Float64Array(CELLS * 3).fill(NaN), cellVal = new Float64Array(CELLS * 8);
 export function vnoise(x, y, z) {
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
   const u = smooth(x - xi), v = smooth(y - yi), w = smooth(z - zi);
-  const c = (dx, dy, dz) => hash3(xi + dx, yi + dy, zi + dz);
+  const slot = ((Math.imul(xi | 0, 73856093) ^ Math.imul(yi | 0, 19349663) ^ Math.imul(zi | 0, 83492791)) >>> 0) & (CELLS - 1), k = slot * 3, o = slot * 8;
+  if (cellKey[k] !== xi || cellKey[k + 1] !== yi || cellKey[k + 2] !== zi) {
+    cellKey[k] = xi; cellKey[k + 1] = yi; cellKey[k + 2] = zi;
+    cellVal[o] = hash3(xi, yi, zi); cellVal[o + 1] = hash3(xi + 1, yi, zi); cellVal[o + 2] = hash3(xi, yi + 1, zi); cellVal[o + 3] = hash3(xi + 1, yi + 1, zi);
+    cellVal[o + 4] = hash3(xi, yi, zi + 1); cellVal[o + 5] = hash3(xi + 1, yi, zi + 1); cellVal[o + 6] = hash3(xi, yi + 1, zi + 1); cellVal[o + 7] = hash3(xi + 1, yi + 1, zi + 1);
+  }
   return mix(
-    mix(mix(c(0, 0, 0), c(1, 0, 0), u), mix(c(0, 1, 0), c(1, 1, 0), u), v),
-    mix(mix(c(0, 0, 1), c(1, 0, 1), u), mix(c(0, 1, 1), c(1, 1, 1), u), v),
+    mix(mix(cellVal[o], cellVal[o + 1], u), mix(cellVal[o + 2], cellVal[o + 3], u), v),
+    mix(mix(cellVal[o + 4], cellVal[o + 5], u), mix(cellVal[o + 6], cellVal[o + 7], u), v),
     w
   );
 }
@@ -45,8 +53,54 @@ export function fbm(x, y, z, octaves = 3) {
   return sum / norm;
 }
 
+// ---------- loading ----------
+
+// The world takes a good many seconds to build (its textures are drawn, its boards cut one by one). Built in one go the
+// page froze that long and browsers called it hung (2026-11-05, players' complaints): it stops now and then to let the
+// browser breathe and to move the loading line on. `whenBuilt`: what arrives over the network (Mum, the angel) waits
+// for the build to be done, as it always did when the build ran in one go.
+let builtDone;
+export const whenBuilt = new Promise((r) => { builtDone = r; });
+export const built = () => builtDone();
+/** What is still on its way over the network (Mum, the angel), for its shaders to be compiled with the rest if it is here in time. */
+export const arrivals = [];
+export const arrive = (p) => { arrivals.push(p.catch(() => {})); return p; };
+/**
+ * A file sent for at once, as the page starts, not when its turn comes late in the building of the world: Mum and the
+ * angel, 21 MB between them, were only asked for ten seconds in, and on a slow line were still coming when everything
+ * else was ready (players, 2026-11-09: "too long to load"). Behind whatever the build itself asks for. Gives its bytes.
+ */
+const sentFor = new Map();
+export function fetchEarly(url) {
+  if (!sentFor.has(url)) {
+    const bytes = fetch(url, { priority: 'low' }).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.arrayBuffer(); });
+    bytes.catch(() => {}); // (whoever uses it hears of it)
+    sentFor.set(url, bytes);
+  }
+  return sentFor.get(url);
+}
+export function breathe(share) {
+  if (share != null) {
+    const el = document.getElementById('start-status');
+    if (el) el.textContent = `Loading… ${Math.round(share * 100)}%`;
+  }
+  return new Promise((r) => {
+    if (document.hidden) { // (no frames in a tab out of sight, and its timers slowed to one a second)
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => r();
+      ch.port2.postMessage(0);
+      return;
+    }
+    let done = false;
+    const go = () => { if (!done) { done = true; setTimeout(r, 0); } };
+    requestAnimationFrame(go); // (a frame drawn: the line shows)
+    setTimeout(go, 60);
+  });
+}
+
 // ---------- textures ----------
 
+const TEXLOG = typeof location !== 'undefined' && location.search.includes('texlog'); // (which function drew each texture)
 export function canvasTex(w, h, draw, opts = {}) {
   const c = document.createElement('canvas');
   c.width = w;
@@ -55,6 +109,8 @@ export function canvasTex(w, h, draw, opts = {}) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = opts.data ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   t.anisotropy = 8;
+  t.userData.drawn = true; // (drawn once here: lighten.js may share it, slim it and let its canvas go once it is on the GPU)
+  if (TEXLOG) t.userData.from = new Error().stack.split('\n')[2]?.trim();
   if (opts.repeat) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(opts.repeat[0], opts.repeat[1]);
