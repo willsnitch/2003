@@ -27,6 +27,12 @@ opening or a lamp.** The always-rules and the checklist stay in `CLAUDE.md`.
   its shared RNG where the wooden doors were: anything new before the steps uses its own RNG, or the basement moves.
 - Random numbers in shaders: no `sin` of big numbers (the GPU's differs): `windDice`.
 
+## Hooks worth knowing
+
+- `hingedDoor` (house.js) takes `before(opening)` and `turn(open)`. Luna (cat.js): `ride` for her boat, `dive` /
+  `swimAlong` when the bathroom is full. The bath (bath.js): two planar reflections while the floor's water and the
+  bath's are apart (`floorMirror`). The pool (pool.js): `poolBubbles` / `poolRipples`.
+
 ## Lines along edges that come and go
 
 Lines that come and go as you move, at corners and along edges seen side-on, worse in a small window: the

@@ -7,7 +7,9 @@ bedroom; around it the rest of the house and the back yard; inside the TV a play
 
 Read only the part you need of: `notes/tech.md` (traps, drawing, lamps, loading, textures, the breeze, measuring —
 **read the matching part before touching any of these, or adding a room, an opening or a lamp**), `notes/world.md`
-(approved state of the yard, the end of the garden and the house), `notes/history.md` (reasons and lessons).
+(approved state of the yard, the end of the garden and the house), `notes/history.md` (reasons and lessons),
+`notes/open.md` (what is waiting on him: things he hasn't judged yet, things noticed but not asked — read it before
+reworking anything recent, and before reporting something as new).
 
 ## His rules — always
 
@@ -19,7 +21,7 @@ Read only the part you need of: `notes/tech.md` (traps, drawing, lamps, loading,
    never copied into the game. Branded items still in the build (poster texts: Linkin Park/Meteora, Eminem, Gorillaz,
    jackass; reference photos in the folder; Spider-Man files in `assets/`): flag, don't touch unless told. The
    Strongvilla font (`assets/fonts/`) is **personal-use only**: licence or swap before sale. An image or model he sends
-   *to be used* goes in as asked; flag its licence once and add it to the licence list in Open items.
+   *to be used* goes in as asked; flag its licence once and add it to the licence list at the end of this file.
 3. **He writes wanted changes as facts** ("the toilet seat is white"): specs to build, not bug reports. Words like
    "too much", "looks like", "doesn't make sense" mark complaints.
 4. **Human touch — nothing perfect, nothing new** (his most repeated note: "above all I don't want things, when
@@ -47,15 +49,14 @@ Read only the part you need of: `notes/tech.md` (traps, drawing, lamps, loading,
 12. **Counts and places he gives are fixed**: place them deterministically (target positions, not RNG draws), so
     they stay put when anything else changes.
 13. **Docs**: don't touch `CLAUDE.md` or `notes/history.md` at the end of a normal round; only when he asks, when a
-    session ends, or for a lesson worth keeping. New technical lessons go in `notes/tech.md`, not here.
+    session ends, or for a lesson worth keeping. New technical lessons go in `notes/tech.md`, not here;
+    what is left waiting on him goes in `notes/open.md` (and comes out when he settles it).
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting restarts after each write: the last was 2026-11-04 (rounds 1–5 of 3–4 Nov, written
-    as 0.5.10, accepted 2026-11-04 with 0.5.8 and 0.5.9); round 1 was 2026-11-09/10 (speed for players: its points are
-    in `notes/history.md`), next is round 2. When a round brings a new playable block or completes a batch, propose
-    the next number and let him decide. Current: **0.5.10** (0.5.1–0.5.3: Mum; 0.5.6: the end of the garden; 0.5.7:
-    the bath's cycle and the stone angel; 0.5.8: lighter + breeze; 0.5.9: fixes, pool bubbles; 0.5.10: the lawn's grass).
+    round of the 5 it was. Counting: the last write was 2026-11-04 (0.5.10); round 1 was 2026-11-09/10 (speed for
+    players, its points in `notes/history.md`); next is round 2. When a round brings a new playable block or
+    completes a batch, propose the next number and let him decide. Current: **0.5.10**.
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
 16. **Keep it fast without losing quality** (his standing wish, 2026-11-10: "as I keep working I want Claude to reason
@@ -112,22 +113,18 @@ Read only the part you need of: `notes/tech.md` (traps, drawing, lamps, loading,
 - `index.html`, `styles.css`; `js/main.js` (renderer, two-scene compositing, HUD, loop, worlds, `hideUnseen`). The
   bedroom (`scene`) and the house + yard (`house.scene`) are **separate scenes** drawn into one picture with shared
   depth, each with its own lights and static shadow maps: this keeps the bedroom's approved lighting untouched.
-- Bedroom: `room.js` (shell, materials `M`, lights), `props.js` (furniture, clutter, `takeable()` with the blue-white
-  rim), `inventory.js` (I), `player.js`, `pc.js` (Macrofrost XD desktop), `cat.js` Luna (A* over the whole house,
-  follows you room to room, perches, `keepClear`, `ride`, `dive`/`swimAlong`), `fur.js`, `audio.js`.
-- House: `house.js` (`PLAN`; bathroom, kitchen + living room, corridor with the attic hatch, locked front door, Mum's
-  door; `hingedDoor` takes `before(opening)` and `turn(open)`), `fixtures.js` (toilet, bath, basin, taps, sofa, TV,
-  rug, ceiling lights…), `build.js` (metric UVs, walls with holes, `bakeStatic`, shadow helpers, early shaders),
-  `bath.js` (taps: E on either turns both on, never off; filling, flood, underwater, the floating towel; `drain`: all
-  of it back down the plug hole; `floorMirror`), `boat.js` (Luna's boat, sou'wester, diving gear; on a drain the boat
-  is sucked into the bath and she shakes the suit off in a poof), `uvtorch.js` (beam held = on; the basin's traces
-  with the light off, switch by the bathroom door), `water.js` (the water's look; `RippleSim` — stir it with
-  `bath.disturb(x, z, amp, r)`), `mother.js` (Mum in the kitchen; how to work on her: `notes/history.md`, "Mum").
-- Outside: `yard.js` (garden, neighbours, street, flamingos, tap), `hose.js` (verlet rope), `grove.js` (the wood,
-  `WIND`), `pool.js` (the end of the garden; `poolBubbles`/`poolRipples`; the angel, his Meshy model
-  `assets/models/angel.glb`, packed from `assets/models/source/`), `basement.js`.
-- Others: `daytime.js`, `textures.js` (all textures, canvas-drawn), `lighten.js` (textures shared and sent to the GPU
-  after the build), `util.js` (`breathe`, `fetchEarly`), `zelpa.js`, `zelpa-hud.js`.
+- Bedroom: `room.js` (shell, materials `M`, lights), `props.js` (furniture, clutter, `takeable()`), `inventory.js`,
+  `player.js`, `pc.js` (Macrofrost XD desktop), `cat.js` (Luna: nav over the whole house, `keepClear`, boat, dive),
+  `fur.js`, `audio.js`.
+- House: `house.js` (`PLAN`, rooms, doors: `hingedDoor`), `fixtures.js` (toilet, bath, basin, taps, sofa, TV, rug,
+  ceiling lights…), `build.js` (metric UVs, walls with holes, `bakeStatic`, shadow helpers, early shaders), `bath.js`
+  (taps: E on either turns both on, never off; filling, flood, underwater, towel, `drain`), `boat.js` (Luna's boat, sou'wester, diving gear), `uvtorch.js`,
+  `water.js` (the water's look; `RippleSim`: stir it with `bath.disturb(x, z, amp, r)`), `mother.js` (Mum; how to
+  work on her: `notes/history.md`, "Mum").
+- Outside: `yard.js` (garden, neighbours, street, flamingos, tap), `hose.js`, `grove.js` (the wood, `WIND`), `pool.js`
+  (the end of the garden, the angel), `basement.js`.
+- Others: `daytime.js`, `textures.js` (all textures, canvas-drawn), `lighten.js`, `util.js` (`breathe`,
+  `fetchEarly`), `zelpa.js`, `zelpa-hud.js`.
 - **The house is raised** `LIFT` 0.75 over the yard, a porch `PORCH` 1.85 deep along the kitchen's back wall (to
   `PORCH_X1`; cellar doors on the house's wall east of it, hose tap and coil right of the back door). yard.js,
   grove.js and hose.js build in their own frame inside a group at (0, −LIFT, −PORCH): what they push to
@@ -188,35 +185,9 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 - Filter long command output (harness, console, logs) with grep/tail.
 - Edit with exact, unique markers; when splicing with a script, search the end marker *after* the start.
 
-## Open items (waiting on him)
+## Before sale: licences to clear
 
-- **No sounds of the game's own** (2026-10-15: he found everything generated bad, kept only his pigeon). Every sound
-  is silent until a recording of that name is in `assets/sounds/` (`README.txt` has the list). Missing above all:
-  `room-tone` (a looping base for every room), steps, doors, water, Luna, the PC and TV.
-- Clocks (2026-11-04): every clock should read 6:04 PM; the stopped clocks in the build still show twenty to four.
-- Noticed, not asked: the fence boards (`fenceBoardTex`) look blotchy up close. Luna's eyes in the living room fixed in
-  code (`cat.housed`) but never seen in an image. Mum's shadow in the sun's and sky's maps is thrown away with a
-  `discard` in her depth material (mother.js): the browser warns "Active draw buffers with missing fragment shader
-  outputs" each time the maps are redrawn — harmless, noisy; cleaner not to draw her there at all.
-- Speed for players (2026-11-10), not judged by him or by a player yet. Not measured: any Windows machine (shader
-  compiling is likely the largest part of a first visit there). Offered, not done: textures drawn on several cores
-  at once; fewer draws for the bedroom (490, one per small thing).
-- Deploy to Netlify (needs his go-ahead; the whole folder, not just `index.html`).
-- Before sale, licences for: `assets/family-portrait.jpg` (the corridor's photo; his edit with a black cat on the
-  father's lap), `assets/calendar-photo.jpg` (a postcard credited "Photo by Frank Ogsbury"), `assets/hell-writing.jpg`
-  (the UV writing, stock-looking), `assets/models/mother.glb` and `assets/models/angel.glb` (Meshy AI: terms depend
-  on his plan), the font.
-- Not yet judged or seen by him in play:
-  - The angel (2.05 m to the wing tips on its plinth, size mine). Not checked: Luna in the end of the garden; fps
-    there on his M2; the drowned flamingo's empty eye in a close-up; the flamingos' eyes in direct sun.
-  - The bath's cycle (2026-11-02): the lines "It won't turn." / "It won't budge." (mine), the water running back up
-    the bath's front and the whirl over the plug (mine), Luna's shake close up, the poof with the light off. A 2 cm
-    sliver of tile is left along the bathroom's door wall (only the sides were asked).
-  - The breeze (2026-11-03: "light, slow, random, now and then; the willow only a little slower"). Still to do: the
-    long grass, tufts, weeds and the leaf litter. Mum costs ~5 ms in the kitchen whatever her shader (her geometry,
-    cause not found).
-  - 2026-11-03: the bath's floor water reflecting from the first centimetre; the pool's bubbles (from ~4 m at a
-    slant the ripples hardly show); the grass under the porch's skirt and 30–40 cm past the lawn's fences, the long
-    grass along the skirt (mine), the 14 lawn weeds. Not measured: fps with the extra grass.
-  - Mum's right fist (2026-10-25/27), above all the wrist, cocked ~45° towards the little finger while she cuts, up
-    to ~60° as she puts the knife down.
+`assets/family-portrait.jpg` (the corridor's photo; his edit with a black cat on the father's lap),
+`assets/calendar-photo.jpg` (a postcard credited "Photo by Frank Ogsbury"), `assets/hell-writing.jpg` (the UV writing,
+stock-looking), `assets/models/mother.glb` and `assets/models/angel.glb` (Meshy AI: terms depend on his plan), the
+Strongvilla font. Everything else waiting on him: `notes/open.md`.
