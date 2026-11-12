@@ -279,159 +279,87 @@ and the current state; `notes/world.md` the approved state of the yard and the h
 
 ## Speed and the breeze (2026-11-02 → 03)
 
-- He asked for "lighter, where possible, without losing quality or details": every change was checked against the
-  old picture pixel by pixel (mean 0.01/255) and measured old against new **in the same page, switched back and forth**
-  — the M2 heats up and before/after runs drift 30 %; a `readPixels` sync doesn't wait for the GPU here. In the real
-  loop the GPU was the limit, and mostly by geometry: from the bedroom, 3.3 M triangles of yard and house behind the
-  walls (porch 1.2 M, trees 1 M). Fixed, all with the same picture: the multisampled picture resolved once instead of
-  three times with depth (`sharedPicture`); the kitchen lamp's cube shadow, redrawn whole every frame Mum moved
-  (6.6 M triangles), now two layers (`layeredShadow`); the bedroom pass left out when unseen; from inside the bedroom,
-  what can't be seen through its window or door left out of the house's picture, not its shadows (`hideUnseen`);
-  shadow lookups skipped on surfaces facing away from a light. The porch in pieces (`inPieces`) alone gave 1–2 fps.
-- The breeze: first a steady wind on everything; he liked only the willow ("the only movement I like, a little
+- "Lighter, where possible, without losing quality or details." In the real loop the GPU was the limit, mostly by
+  geometry: from the bedroom, 3.3 M triangles of yard and house behind the walls. Everything done gave the same
+  picture (checked pixel by pixel, mean 0.01/255) and was measured old against new in the same page (how and what:
+  `notes/tech.md`, Drawing). The porch in pieces alone gave 1–2 fps.
+- The breeze: a steady wind on everything was rejected; he liked only the willow ("the only movement I like, a little
   slower") and wanted the rest "light, slow and random, not too repeated, as if a breeze moved the leaves now and
-  then, not all the time". So a `breeze` that is zero most of the time, from value noise (no beat), crossing the
-  garden. Leaves move only where they are seen; their shadow lookups use where they hang at rest, or they flicker in
-  their own shadows. His "shimmer on the lawn": at 18:00 the sun lights only the crowns' tops (checked with the sun
-  alone switched off), so what moves is the sky light's spots under the crowns (`dappled`), and only where leaves 3 m+
-  up are what's in the way (not a fence's or the shed's shadow, nor the grass's own).
-- Lesson: a `sin`-based hash of large numbers differs between the GPU and JS — a test picking "a gusty moment" in JS
-  found the trees still. Use an arithmetic hash (`windDice`).
+  then". His "shimmer on the lawn" at 18:00 is the sky's light under the crowns, not the sun's (checked with the sun
+  alone off). State: `notes/tech.md`, The breeze.
 
 ## The bath's film, the pool's bubbles, grass at the edges (2026-11-03, later)
 
-- "Up to the sixth tile a pale film on the water": the bathroom had one planar reflection, and while the floor's water
-  was still apart from the bath's (under the rim, 0.55 m) it went to the bath; the floor's showed the white room it
-  reflects when there is none. Each now has its own while both show (`floorMirror`, `floorU`; ~95k triangles more for
-  those seconds). Found by reading `bath.look.roomRefl` / `bathRefl` at a level, not by guessing.
+- "Up to the sixth tile a pale film on the water": one planar reflection served the bath while the floor's water was
+  still apart from it, so the floor's showed the white room. Each has its own while both show (`floorMirror`, `floorU`).
+  Found by reading `bath.look.roomRefl` / `bathRefl` at a level, not by guessing.
 - The pool's bubbles: "horrible — not white, the rings too perfect; realistic, soft, a movement of the water that
-  spreads; light green, in keeping with the pool", then "darker". The ring is now the water's own slope in its
-  shader. Its sky is flat, so a ripple shows only where its slope runs along your view, the very parts a pixel's
-  footprint thins out at a slant: fading by the whole footprint killed them past 2 m; by each ring's own (`fwidth(r)`)
-  and slightly longer waves they hold to ~3 m.
-- The pool wall's worn patches ("too AI, not realistic"): a careful redo was turned down outright — "put it back
-  exactly as before" — and was put back, dice and all. With a look he complains about, show a small step before a
-  remake, and keep the old code to hand.
-- The line where the grass ended at the porch was a black box 4 cm behind its skirt; grass going on under a deck
-  needs its light taken away too (`underDeck`), or it glows in there.
+  spreads; light green", then "darker". The ring is now the water's own slope; fading by each ring's own footprint
+  (`fwidth(r)`) keeps them to ~3 m.
+- The pool wall's worn patches ("too AI, not realistic"): a careful redo was turned down — "put it back exactly as
+  before" — and was, dice and all. **With a look he complains about, show a small step before a remake, and keep the
+  old code to hand.**
+- Grass going on under a deck needs its light taken away too (`underDeck`), or it glows in there.
 
 ## Testing
 
 - The Browser pane forwards his real input: set `GAME.player.setPose(...)` before measuring; aim rays at object
-  centres. A raycast from the camera first hits helper planes 0.3–0.5 m out: filter `distance > 0.8`.
-- With the pane hidden, screenshots are stale: copy the canvas to a 2D canvas right after a frame, POST it to a small
-  local receiver, Read the JPEG (`tools/harness.js` + `tools/snap-receiver.py` do this). If the pane is closed the
-  page can have zero size: `resize_window` first.
-- Check motion frame by frame with a fake `performance.now` advanced 50 ms a frame.
-- A `javascript_tool` call stepping a few hundred rendered frames of the house times out ("Internal error") and may
-  stop halfway: step ≤ ~120 frames a call, keep results in `window`. Real keys in the pane work (`computer` key), but
-  unlocked the view follows the mouse: set yaw/pitch in the same batch, right before the key. `say('')` leaves the
-  last line up for its 3 s.
-- Copying the canvas after an `await` gives black (the picture is already handed over): step one frame right before
-  `drawImage`, as `grid()` does. To judge something small at play distance, crop the full-size canvas round its
-  projected point instead of zooming the camera.
-- A whole bath cycle in seconds (2026-11-11): step only `GAME.house.bath.update`, `GAME.cat.update` and
-  `GAME.boat.update` in a loop (dt 1/40, no drawing): taps to full is ~110 s of game time, a few seconds real. The
-  doors' logic (`bathShut`, `bathDoorAfter`) lives in main.js's tick: test it with `frames()`. In the water the player
-  floats only with `player.swimming` set (the plain loop never updates you), and sinks slowly unless held up: set
-  `player.feet` every frame for a fixed eye.
+  centres. Real keys work (`computer` key), but unlocked the view follows the mouse: set yaw/pitch in the same batch.
+  `say('')` leaves the last line up for its 3 s.
+- With the pane hidden, screenshots are stale: copy the canvas right after a frame, POST it to a local receiver
+  (`tools/harness.js` + `tools/snap-receiver.py`). After an `await` the copy is black: step one frame right before
+  `drawImage`, as `grid()` does. A closed pane can give the page zero size: `resize_window` first. To judge something
+  small at play distance, crop the full-size canvas round its point instead of zooming the camera.
+- Motion frame by frame: a fake `performance.now` advanced 50 ms a frame; ≤ ~120 rendered frames per tool call.
+- A whole bath cycle in seconds: step only `GAME.house.bath.update`, `GAME.cat.update`, `GAME.boat.update` (dt 1/40,
+  no drawing): taps to full ~110 s of game time. The doors' logic (`bathShut`, `bathDoorAfter`) is in main.js's tick:
+  test it with `frames()`. In the water you float only with `player.swimming` set; set `player.feet` each frame for a
+  fixed eye.
 
-## Speed for players (2026-11-05)
+## Speed for players (2026-11-05 → 12)
 
-- Players complained it lagged and froze their browsers. On the M2 the page was frozen ~21 s building (textures drawn,
-  boards cut) and then ~10 s more in the first frame compiling 127 shaders one by one (each waited for). Now the build
-  stops every second or two (`breathe`), the shaders are compiled side by side before the first frame
-  (`KHR_parallel_shader_compile` via `compileAsync`), and their uniforms are fetched then too (asked in the first
-  frame, behind every shadow map, each question waited ~10 ms). Ready in ~22 s instead of ~45 s in the preview,
-  never frozen more than ~2 s at a time. The noise's sines were a third of the texture time: cached per cell.
-- In the yard the M2 is bound by the ~2000 draw calls a frame (the browser's GPU process), not by pixels: a quarter
-  of the resolution saves ~10 ms of ~37. Sending uniform arrays only when changed cut the main thread's GL calls but
-  not the frame time there (measured on/off in the same page). Fewer draw calls (merging) is what would help next.
-- Mum's body had the bathroom's water patch (17 textures, one over the limit: a warning every frame): `noWater`.
+- Players: "it lags, it froze my browser"; then (11-09) "people still struggle: it lags and takes too long to load. I
+  don't want to lose quality, or the way I work." So only same-picture changes, nothing baked or compressed: the game
+  still draws itself from the code at every load. What was done and how it is kept right: `notes/tech.md` (Drawing,
+  Loading, the rehearsal); the method: `notes/tech.md`, Speed.
+- What the numbers showed, against the guesses: the page froze ~21 s building and ~10 s compiling shaders one by one
+  (now spread with `breathe`, compiled side by side: `KHR_parallel_shader_compile` via `compileAsync`); in the yard the M2 is bound by draw calls, indoors by the pixels'
+  lamps (a depth pass gave nothing: Apple's GPU already skips hidden surfaces); "slow" tree limbs were the bark; `bleed`
+  cost 1.6 s for nothing; the bedroom's glow shadow (~500 draws) was redrawn every frame because Luna "moved" in the
+  living room. Gains: corridor 28 → 19.5 ms, kitchen 39 → 27, living room 32.5 → 20; from the yard 2325 → 1665 draws;
+  a first visit 31.9 → 20.6 s (20 Mbit line).
+- Lessons: two loads are not the same picture unless the dice are seeded (`?seeded`) and the hatch's lamp pinned — an
+  hour lost thinking an exact shortcut was not. The console keeps warnings from earlier loads: count errors in the page
+  (`?gltrace`). A margin "the eye is in the doorway" must be by the doorway, not along its wall's line. `listUnseen` waited
+  120 frames before its first look: nothing was hidden for the first two seconds. The bedroom's
+  shaders begun before `twoFills` kept the old lighting chunk under the same key: 14 stale shaders, found only by
+  comparing their texts.
+- **The freeze as the taps open** (11-11/12, round 4; his: "it lags when I open the water and Luna gets into the boat /
+  the diving suit; Brave, on Netlify; it really stops to load"): only on a first visit, which is why it was never seen
+  here — 2.9 s as the taps opened, then 0.6–1.2 s stops as the water spread and the boat came. Causes and the fix (the
+  rehearsal): `notes/tech.md`. The first plan, everything under the loading line, cost 18 s: what cannot be free is
+  best done where nobody waits (behind the start window, while the eye is still), and only what matters held for.
 
-## Speed for players, again (2026-11-09 → 10; round 1 of 5 for `versions.md`)
+## Luna in the bathroom, the loading bar (2026-11-11; round 2 of 5)
 
-- "People still struggle: it lags and takes too long to load. I don't want to lose quality, or the way I work." All
-  of it kept to what gives the same picture, and nothing baked or compressed: the game still draws itself from the
-  code at every load, so nothing in how it is edited changes.
-- Measured first, with a profile of the load and the GPU's own timer per frame (`tools/measure-server.py`). The lag:
-  on the M2 indoors the GPU took 28–39 ms a frame with only 300–1400 draws — the pixels, each working out all 15 of
-  the house's lamps. A depth pass first gave nothing here (Apple's GPU already skips hidden surfaces), and the
-  shadows' lookups are only ~15 % of it. What helped: skipping a lamp whole where it gives nothing (corridor
-  28 → 19.5 ms, kitchen 39 → 27, living room 32.5 → 20). From the yard, looking at the house: every room's contents
-  were drawn behind its walls, and the bedroom's glow shadow (~500 draws) was redrawn every frame because Luna
-  "moved" in the living room: 2325 → 1665 draws (1180 with Luna still), 25.7 → 21.7 ms. Looking away from the
-  house nothing changed (18.5 ms).
-- The loading: the build is spread thin (no single culprit left: `bleed` was 1.6 s for nothing, the "slow" tree
-  limbs were the bark being drawn). A first visit also compiles 214 shaders, ~11 s, at the very end, and on a slow
-  line waited up to 8 s more for Mum and the angel, asked for only 10–12 s in. Sent for at the start and the
-  shaders begun as soon as the world is built: 31.9 → 23.3 s on a first visit over a simulated 20 Mbit line;
-  ~1 s on a fast one; a later visit ~15 s as before.
-- Lessons. Two loads of the game are not the same picture: the rug's weave (and ~25 small textures) use
-  `Math.random`, and the hatch's lamp has fits — compare with `?seeded` and the lamp pinned, or a real difference
-  and these can't be told apart (an hour lost thinking the lamp shortcut was inexact). The browser's console keeps
-  warnings from earlier loads: count errors in the page (`?gltrace`), not there. A margin "the eye is in the
-  doorway" must be by the doorway, not anywhere along its wall's line (from the lawn it switched the hiding off).
-  `listUnseen` waited 120 frames before its first look: nothing was hidden for the first two seconds.
-- Then (his go-ahead): the rooms' shaders begun before the yard is built, lit by stand-in lamps (a shader is made
-  for a count of lamps of each kind), each material given the bathroom's water patch then instead of at the end:
-  a first visit 25.9 → 20.6 s on the M2. Checked by the text of every shader against the old order's, under the same
-  key: 214 the same, 2 extra. Lesson: the bedroom's, begun before `twoFills` had changed the shared lighting chunk,
-  kept the old chunk under the same key — 14 stale shaders, found only by comparing texts; "which shader a material
-  has now" is not comparable between two loads (shared materials), the set of all programs by key is.
+- His points, as specs: once the taps are on Luna comes to you and sits looking at you, follows, sits when you stop;
+  when the boat comes up she stops and watches it till she jumps in (it had followed her about); a water animation for
+  her dive; then she comes to your face and looks at you 5 s; the water 20% faster; going out she comes out with you,
+  then the door shuts; the loading box with a green block bar and, loaded, a Start button. State: `notes/world.md`.
+- Mine: the stream and the sheet over the front 20% faster too (not the drain); the door slams going out as going in.
+  At your heel I had her keep your pace — he wants her own walk, whatever yours.
+- Lessons (more in `notes/tech.md`): no bolting while she watches or keeps by you (she fled 4 m from under your feet);
+  a sprite's scale set only in `update` is a metre wide for a frame; in the full room she stuck behind you 14 s.
 
-## Luna in the bathroom, the loading bar (2026-11-11; round 2 of 5 for `versions.md`)
+## The eye going out into the yard (2026-11-11; round 3 of 5)
 
-- His points, as specs: once the taps are on Luna comes to you and sits looking at you, follows when you move, sits
-  when you stop; when the boat comes up she stops (if walking) and watches it till she jumps in — he had seen it come
-  up as she walked and follow her about (boat.js aimed it 0.75 m off her every frame in `wait`); a water animation
-  for her dive; after it she comes to your face and looks at you 5 s, then her usual things; the water 20% faster;
-  going out, she comes out with you and then the door shuts; the loading box with the green block bar of the time and,
-  loaded, a Start button (was Enter). State in `notes/world.md` (the boat, the bath's cycle).
-- Mine: the stream and the sheet over the bath's front run 20% faster too (not the drain); the door slams going out
-  as it does going in; at your heel I had her keep your pace — he wants her own walk, whatever yours; the bar drawn in CSS, in
-  whole blocks, as tall with its margins as the button that replaces it (the window jumped 14 px: collapsing margins); the
-  status line hidden once loaded and the button centred between the keys and the window's foot (it sat high).
-- Lessons: the first test showed her bolting from under your feet while watching the boat (4 m off, then back): no
-  bolting while she watches or keeps by you. The splash's bubbles were drawn a metre across for a frame (scale set
-  only in `update`). In the full room she stuck behind you for 14 s: the water is narrower than the room she keeps
-  off you, and her stuck-test fired while she turned. Facing the boat square, her nose went 6 cm into its side.
-  The rest in `notes/tech.md`.
-
-## The eye going out into the yard (2026-11-11; round 3 of 5 for `versions.md`)
-
-- His point: "a strange play of light as I go out into the garden; it means to do what the eye does going from a
-  dark room into daylight: judge whether it is done well and whether everything out there answers rightly. I want
-  the passage realistic."
-- Found (measured, the camera still, `house.outdoors` forced): stepping out the sky dimmed (×0.7 on screen) while
-  the shade lifted 1.2–7× and turned from brown to blue — the outdoor fill was the house's own (0.8, brown) for an
-  eye indoors and the open sky's (2.0, blue) out there, switched over 0.4 m at the door in a quarter of a second,
-  the sun and sky over two seconds; reflections (slide, puddles, pool) and the neighbours' lit windows never changed.
-- Done: one exposure for all of it (state in `notes/world.md`, "Light out there"); two paces out, slower in; the
-  cellar counts as the dark. Mine, forced by it: the back door's inner face and the inner half of its threshold keep
-  the house's fill; thin things on the inner faces of outer walls are the rooms' again (`notes/tech.md`, Traps).
-- Lesson: the old eye-dependent fill hid three mistakes at once (the yard dark from indoors, indoor tiles lit as
-  out of doors, the door's two faces sharing a fill). After the change, difference old against new from indoors
-  before believing "indoors nothing changes".
-- Same round, his second point: "what's this black on the blades? only on the short ones?" — mine: the new indoors
-  test let the short grass's empty box (no blades yet at the bake) through as "inside a room", so it lost the sky's
-  fill and took every lamp: black blades in the shade, 8 % of the lawn's pixels; the yard 2–4 ms slower too, which
-  I had reported without finding why. Fixed (`notes/tech.md`, Traps).
-
-## The freeze as the taps open (2026-11-11/12; round 4 of 5 for `versions.md`)
-
-His: "in the browser it lags when I open the water and Luna gets into the boat / the diving suit; Brave, on Netlify;
-it really stops to load".
-- Found (a first visit, `?cold`, frame by frame): 2.9 s as the taps opened, 1.2 s as the water went over the side,
-  ~1 s as it spread, 0.6 s as the boat came, 0.6 and 1.1 s as it came into view; nothing of it on later visits, which
-  is why it was never seen here. Two causes, both "left to the first draw": the card readies each shader again for
-  every kind of picture (the water's mirror is not the screen's kind), and `compile` made Luna's and her suit's
-  shaders for the wrong number of clipping planes, so the right ones were made in play (`notes/tech.md`, Traps).
-- Done: the rehearsal (main.js `rehearse`; `notes/tech.md`, Loading). The whole cycle run again cold, twice: no
-  shader made in play, the longest frame 81 ms (233 ms on first stepping into the bathroom, as into any room).
-- Lessons: the first plan (everything under the loading line) cost 18 s; the card does one thing at a time, so
-  nothing of it hides behind the shaders' compiling; what cannot be free is best done where nobody is waiting
-  (behind the start window, while the eye is still) and only the part that matters held for. And a two-load picture
-  test needs the same dice in both: three takes Math.random for every object, so one object more in one load moved
-  Luna's tail in the other — it looked like a change to her and was the test's.
-
+- His: "a strange play of light as I go out into the garden; it means to do what the eye does going from a dark room
+  into daylight… I want the passage realistic."
+- Found by measuring with the camera still (`house.outdoors` forced): stepping out the sky dimmed while the shade lifted 1.2–7× and turned from
+  brown to blue (the outdoor fill was the house's for an eye indoors, switched at the door in a quarter second);
+  reflections and the neighbours' windows never changed. Now one exposure for all of it (`notes/world.md`, Light out
+  there).
+- Lessons: the old eye-dependent fill hid three mistakes at once; after such a change, difference old against new from
+  indoors before believing "indoors nothing changes". His second point, "black on the short blades": an empty bounding
+  box passed the new indoors test (`notes/tech.md`, Traps) — and the yard had got 2–4 ms slower, which I had reported
+  without finding why. Find the why before reporting a cost.

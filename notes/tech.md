@@ -17,7 +17,8 @@ opening or a lamp.** The always-rules and the checklist stay in `CLAUDE.md`.
 - A raycast from the camera first hits helper planes 0.3–0.5 m out: filter `distance > 0.8`.
 - `AnimationMixer` writes a bone only when its value changes: turns added on a held pose pile up. mother.js sets her
   pose by hand each frame. Her shader uses 15 of the 16 textures a fragment shader may read: one more shadowed light
-  in the house scene and she stops drawing; merge or drop a map first.
+  in the house scene and she stops drawing; merge or drop a map first. Her body never takes the bathroom's water patch
+  (`noWater`): with it she read 17, one over (a warning every frame).
 - A mesh from surface nets or any generated field: check the winding against the normals (in the game you see its
   inside: "the face has gone"). `Math.hypot` is slow in a hot field. Custom samplers on sRGB textures return linear.
 - Metric UVs count tiles and boards from world zero: a room whose walls are off that grid gets cut tiles at them —
