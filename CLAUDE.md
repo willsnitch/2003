@@ -54,9 +54,9 @@ reworking anything recent, and before reporting something as new).
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting: 0.5.12 opened 2026-11-12 at his request ("update to version 0.5.2", read as
-    0.5.12: his to confirm), round 1 written straight away; next is round 2. When a round brings a new playable block
-    or completes a batch, propose the next number and let him decide. Current: **0.5.12**.
+    round of the 5 it was. Counting: 0.5.21 opened 2026-11-12 (he chose the number, after 0.5.11, for the speed update;
+    first written as 0.5.12), round 1 written straight away; next is round 2. When a round brings a new playable block
+    or completes a batch, propose the next number and let him decide. Current: **0.5.21**.
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
 16. **Keep it fast without losing quality** (his standing wish, 2026-11-10: "as I keep working I want Claude to reason

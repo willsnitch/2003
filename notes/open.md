@@ -48,7 +48,7 @@ Keep this up to date: add what is left waiting at the end of a round, remove wha
   at once; fewer draws for the bedroom (490, one per small thing).
 - Deploy to Netlify (needs his go-ahead; the whole folder, not just `index.html`).
 - Not yet judged or seen by him in play:
-  - 2026-11-12 (round 1 of 5 for 0.5.12): the pool's waterline — the water's scum green carried up the wall 4–17 cm,
+  - 2026-11-12 (round 1 of 5 for 0.5.21): the pool's waterline — the water's scum green carried up the wall 4–17 cm,
     fading out unevenly, as dark as the scum where they meet; a fringe of it 2–7 cm wide on the water against the wall;
     duckweed fronds stuck to the wall in the first few cm (colour, heights and amount mine; seen at 2–5 m only: nowhere
     lets you get nearer the waterline). Shutting the bathroom door yourself from outside with Luna in there: she comes

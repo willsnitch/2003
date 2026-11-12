@@ -211,7 +211,7 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   Luna gets into her boat and suit (readied while loading and behind the start window: ~3 s more loading). No flashes
   of sunlight in the corridor's far right corner as you walk; no bright line round the attic hatch.
 
-## 0.5.12 — Luna never shut in, the pool's waterline (2026-11-12 →, in progress)
+## 0.5.21 — Luna never shut in, the pool's waterline (2026-11-12 →, in progress; his number, after 0.5.11)
 - 12 November (round 1 of 5, written at his request): Luna is never shut in the bathroom — the door waits till she is
   out, also when you go in and straight out while she is still on her way, or shut it yourself from outside (she comes
   out first); a door shut across her way stops her instead of her walking through it. At your heel with the taps on she
