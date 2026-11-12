@@ -76,6 +76,8 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
   const out = new THREE.Vector2(doorX, B.z0 - 0.47); // and where she lands in the corridor, jumping out
   const at = new THREE.Vector3(), aim = new THREE.Vector3(), deck = new THREE.Vector3(), floor = new THREE.Vector3(), up = new THREE.Vector3();
   let yaw = 0, risen = 0, mode = 'gone', wanderIn = 0, apart = 0, stuck = 0, clipped = false, gearHulled = false, splashed = false;
+  let cameBy = false, farFor = 0, leapt = false; // (come up right beside her; how long she has been out of reach of it; off it in a leap)
+  const headAt = new THREE.Vector3(), watched = new THREE.Vector3(), stay = new THREE.Vector3(); // (where it settles, come up beside her)
   const shove = new THREE.Vector2(); // what you gave it, wading into it
   const rest = new THREE.Vector3(); // where it waits with her not in: by the door, or where you shoved it to
   const dryPlanes = boat.userData.inside.map(() => new THREE.Plane());
@@ -156,6 +158,10 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
     const open = blocks();
     if (open) D.blocks.push(open); // the cabinet's door, standing open
     if (door) { const S = door.seg; D.blocks.push({ x0: Math.min(S.ax, S.bx) - 0.05, x1: Math.max(S.ax, S.bx) + 0.05, z0: Math.min(S.az, S.bz) - 0.05, z1: Math.max(S.az, S.bz) + 0.05, base: 0, top: 2.1 }); }
+    // and you, feet to the top of your head: the room is too narrow to swim round you (0.76 m of water across, and she keeps
+    // 0.55 m off you), so her ways go over your head or under your feet — coming to you from behind, she stuck there
+    const you = cat.player;
+    D.blocks.push({ x0: you.pos.x - 0.25, x1: you.pos.x + 0.25, z0: you.pos.y - 0.25, z1: you.pos.y + 0.25, base: you.feet, top: cat.camera.position.y + 0.15 });
   };
   const dive = (flood) => {
     const D = {
@@ -267,6 +273,8 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       const youIn = inBath(player.pos.x, player.pos.y);
       apart = youIn ? 0 : apart + dt;
       poof.update(dt, cat.camera);
+      // the taps on, and no boat yet: she keeps by you, sitting looking at you whenever you stop (cat.heelAlong)
+      cat.heel = mode === 'gone' && !suck && !water.draining && (water.state.hot || water.state.cold) && lunaIn && youIn && !cat.dive && !cat.ride;
 
       // ---- the water going back (bath.js drain, the door opened: user, 2026-11-02): swimming, or up in the water
       // off the bow, down she comes with it onto a clear patch of floor (cat.carriedDown); still in her suit once
@@ -307,16 +315,19 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
           cat.ride = null;
           wear(false);
           cat.queue = [{ type: 'jump', to, arc: 0.35, reach: 2.5, splash: true }]; // (into the water and straight on swimming: no landing on nothing)
-          leaping = true;
+          leaping = leapt = true;
           splashed = false;
         }
-        if (leaping && !splashed && cat.air && cat.groundY < flood - 0.12) { water.disturb(cat.pos.x, cat.pos.z, 0.5); splashed = true; } // (where she goes in)
+        // where she goes in, helmet first: the water thrown up and stirred by her dive (bath.js splash; user, 2026-11-11)
+        if (leaping && !splashed && cat.air && cat.rig.head.getWorldPosition(headAt).y < flood + 0.06) { water.splash(headAt.x, headAt.z, cat.yaw); splashed = true; }
         if (leaping && cat.queue[0]?.type !== 'jump') leaping = false;
         // (never while she is still in the boat: it started as soon as her suit was on, and she swam up out of
         // the boat sideways, turning over, instead of leaping — user, 2026-10-19: "a horrible movement")
         if (!cat.dive && !cat.ride && !leaping && lunaIn && apart < 1 && !cat.air && cat.queue[0]?.type !== 'jump') {
           gear.on(true);
           cat.dive = dive(flood);
+          cat.dive.greet = leapt; // straight from her leap: to you first, in front of your face (cat.planSwim)
+          leapt = false;
         }
         if (cat.dive) {
           Object.assign(cat.dive, { y1: Math.min(flood - 0.55, CEILING_ROOM), home: apart > 2 });
@@ -362,6 +373,16 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
         risen = 0;
         boat.visible = true;
         cat.obstacles = [hull];
+        // and she stops where she is, turned to it, and watches it come up till she jumps in (user, 2026-11-11: it came
+        // up as she walked, and followed her about): it waits there for her — come up by the door, it goes over to her
+        cameBy = !!by;
+        farFor = 0;
+        // settling a little out from her as it comes up (fixed now: it never follows her), so that turning to it she
+        // doesn't put her nose into its side (she was pushed off it, sliding: Cat.keepClear)
+        const ox = at.x - cx, oz = at.z - cz, o = Math.hypot(ox, oz) || 1;
+        stay.set(cx + (ox / o) * Math.max(o, 0.6), 0, cz + (oz / o) * Math.max(o, 0.6));
+        cat.heel = false;
+        if (lunaIn && !cat.committed && !full) cat.watch(watched.set(at.x, flood + 0.05, at.z));
         if (full) {
           // already full to the top (never in play: it comes up at the first row of tiles): it is
           // simply lying on the bottom, out of the way
@@ -424,8 +445,10 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
         }
       }
       if (mode === 'wait') {
-        // she is in here on her feet: go and lie alongside her, and in she jumps; hold still while she does
-        if (boarding) aim.copy(at);
+        // she is in here: it waits where it came up, beside her, for her to jump in; come up by the door, it goes and
+        // lies alongside her as she stands watching it (never after her while she walks); hold still while she jumps
+        if (boarding || (lunaIn && !cameBy && cat.queue[0]?.type === 'walk')) aim.copy(at);
+        else if (lunaIn && cameBy) aim.copy(stay);
         else if (lunaIn && !cat.ride && !cat.air) {
           const ax = at.x - cat.pos.x, az = at.z - cat.pos.z, a = Math.hypot(ax, az) || 1;
           aim.set(cat.pos.x + (ax / a) * 0.75, 0, cat.pos.z + (az / a) * 0.75);
@@ -462,7 +485,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       if (shove.lengthSq() > 1e-6) { // the shove dying away in the water
         if (fits(at.x + shove.x * dt, at.z + shove.y * dt, yaw)) { at.x += shove.x * dt; at.z += shove.y * dt; } else shove.set(0, 0);
         shove.multiplyScalar(Math.exp(-dt * 1.6));
-        if (mode === 'wait') rest.set(at.x, 0, at.z); // shoved, it goes where it is shoved, and stays there
+        if (mode === 'wait') { rest.set(at.x, 0, at.z); stay.copy(rest); } // shoved, it goes where it is shoved, and stays there
         if (shove.lengthSq() < 1e-4) shove.set(0, 0);
       }
       // afloat: bobbing, rocking, a little sunk for the cat in it
@@ -484,6 +507,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       const rock = aground ? 0 : 1;
       boat.rotation.set(Math.sin(time * 1.1) * 0.02 * rock, yaw, Math.sin(time * 0.9 + 1) * 0.028 * rock, 'YXZ');
       boat.updateMatrixWorld(true);
+      if (cat.watching) cat.lookPoint.set(at.x, boat.position.y + 0.12, at.z); // (her eyes on it as it comes up)
       if (boat.userData.dry.visible) water.volume.dry(boat.userData.inside.map((p, i) => dryPlanes[i].copy(p).applyMatrix4(boat.matrixWorld)));
       boat.localToWorld(deck.copy(SIT));
       const fx = Math.sin(yaw) * (LEN / 2 - BEAM / 2), fz = Math.cos(yaw) * (LEN / 2 - BEAM / 2);
@@ -494,6 +518,7 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
       if (mode === 'wait' && lunaIn && !cat.ride && !cat.air && !cat.dive && risen >= 1 && !boarding && !aground) {
         const q = cat.queue[0];
         const far = Math.hypot(cat.pos.x - deck.x, cat.pos.z - deck.z);
+        farFor = far >= 1.0 && q?.type !== 'walk' ? farFor + dt : 0; // (shoved off out of her reach, waiting where it is)
         if (q?.type !== 'jump' && far < 1.0) {
           cat.queue = [{ type: 'jump', to: [deck.x, deck.y, deck.z], arc: 0.2, board: true, yaw, reach: 1.3 }];
           cat.groom.on = false;
@@ -501,17 +526,18 @@ export function lunaBoat(scene, cat, { bathroom: B, water, colliders, env = null
           // it can't get any nearer (she is in the doorway, it keeps out of the door's way): she jumps
           cat.queue = [{ type: 'jump', to: [deck.x, deck.y, deck.z], arc: 0.25, board: true, yaw, reach: 1.3 }];
           cat.groom.on = false;
-        } else if (stuck > 1.5 && q?.type !== 'jump' && q?.type !== 'walk') {
-          // it can't get to her where she is: she goes to it
+        } else if ((stuck > 1.5 || (cameBy && farFor > 1)) && q?.type !== 'jump' && q?.type !== 'walk') {
+          // it can't get to her where she is (or it waits out of her reach): she goes to it
           const ax = cat.pos.x - deck.x, az = cat.pos.z - deck.z, a = Math.hypot(ax, az) || 1;
-          cat.queue = [{ type: 'walk', x: deck.x + (ax / a) * 0.7, z: deck.z + (az / a) * 0.7, speed: 0.5 }, { type: 'pose', pose: 'stand', dur: 30, look: 'ahead' }];
-          stuck = 0;
-        } else if (q?.type !== 'jump' && q?.type !== 'pose' && q?.type !== 'walk') {
-          cat.queue = [{ type: 'pose', pose: 'stand', dur: 30, look: 'ahead' }]; // waiting for it to come to her
+          cat.queue = [{ type: 'walk', x: deck.x + (ax / a) * 0.7, z: deck.z + (az / a) * 0.7, speed: 0.5 }, { type: 'pose', pose: 'stand', dur: 30, look: 'point', watch: true }];
+          stuck = farFor = 0;
+        } else if (q?.type !== 'jump' && q?.type !== 'pose' && q?.type !== 'walk' && q?.type !== 'face') {
+          cat.watch(watched.set(at.x, boat.position.y + 0.12, at.z)); // waiting for it, watching it
         }
       }
       if (mode === 'wait' && cat.boarded) {
         cat.boarded = false;
+        cameBy = false;
         mode = 'ride';
         water.state.boost = 2; // she's in: the taps run twice as hard from now on, and up it comes
         wanderIn = 2;
@@ -1295,6 +1321,8 @@ function diveGear(cat, env = null, scene = null, water = null) {
   const state = {
     worn: false,
     hull,
+    /** Her paws' own materials while it is on (main.js: given the bathroom's water and readied with the rest, before the game). */
+    paws: pawMats,
     /** Putting it on, in her boat (suitUp): `worn` once it is all on. */
     get dressing() { return dressT >= 0; },
     update(dt = 0) {

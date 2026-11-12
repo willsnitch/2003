@@ -325,8 +325,36 @@ const noLamps = (s) => s.replace('#include <lights_fragment_begin>', THREE.Shade
  */
 import { YARD_SUN } from './util.js';
 export { YARD_SUN };
+/**
+ * The same, for what out there is not lit by the sun or the sky: what it reflects (the slide's steel, the puddles, the
+ * pool) and what glows (the neighbours' lit windows). 1 is as it is made, which is how you see it out in the yard;
+ * from indoors it is brighter by as much as the sun on it is (house.js sets both: one exposure for all of the yard —
+ * these had stayed as they were while everything round them dimmed: user, 2026-11-11).
+ */
+export const YARD_EYE = { value: 1.8 };
+const SAME_TO_EVERY_EYE = { value: 1 };
+// A thing that stands in a doorway, lit by the lamps too (the back door): the face of it turned into the house takes the
+// house's own fill, as the wall beside it does, the rest the open air's. `userData.indoorSide = { value: Vector4 }`: x, y, z
+// the way into the house, w how far this holds (1 shut … 0 swung out into the yard). Without it, the open air's all over.
+// (Until 2026-11-11 the open air's fill was the house's own while your eye was indoors, which did this by itself — and
+// left the whole yard, seen from indoors, in the house's dim fill.)
+const NO_INDOOR_SIDE = { value: new THREE.Vector4(0, 0, 0, 0) };
+const FILL_OUT = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ 1 ], geometryNormal );';
+const FILL_BY_SIDE = 'irradiance += mix( getHemisphereLightIrradiance( hemisphereLights[ 1 ], geometryNormal ), getHemisphereLightIrradiance( hemisphereLights[ 0 ], geometryNormal ), uIndoorSide.w * step( 0.0, dot( inverseTransformDirection( geometryNormal, viewMatrix ), uIndoorSide.xyz ) ) );';
+const EYE_ON_REFLECTIONS = `
+	#if defined( RE_IndirectSpecular )
+		radiance *= uYardEye;
+		clearcoatRadiance *= uYardEye;
+	#endif
+	#if defined( RE_IndirectDiffuse )
+		iblIrradiance *= uYardEye;
+	#endif`;
 
-/** `m`'s sun and sky scaled by YARD_SUN, and its fill the open air's (`twoFills`): an outdoor thing, whatever lamps light it. */
+/**
+ * `m`'s sun and sky scaled by YARD_SUN, and its fill the open air's (`twoFills`): an outdoor thing, whatever lamps light
+ * it. One that no lamp lights (`outdoorLit`) has what it reflects and its own glow scaled too (YARD_EYE), unless it is
+ * marked `userData.sameToEveryEye` — the window panes' sheen, the house's own, which looks the same from both sides.
+ */
 export function outdoorSun(m, lamps = true) {
   if (m.userData.outdoorSun) return;
   m.userData.outdoorSun = true;
@@ -334,10 +362,14 @@ export function outdoorSun(m, lamps = true) {
   m.onBeforeCompile = (sh, r) => {
     before.call(m, sh, r);
     sh.uniforms.uYardSun = YARD_SUN;
+    sh.uniforms.uYardEye = lamps || m.userData.sameToEveryEye ? SAME_TO_EVERY_EYE : YARD_EYE; // (the same code either way: no shader more)
+    if (lamps) sh.uniforms.uIndoorSide = m.userData.indoorSide ?? NO_INDOOR_SIDE;
     if (as) Object.assign(sh.uniforms, { uSunTint: { value: as.tint }, uSunAs: { value: as.as } });
     let f = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin);
     f = f.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= uYardSun;' + (as ? '\n\t\tif ( distance( normalize( directionalLight.color ), uSunTint ) < 0.02 ) directLight.color *= uSunAs;' : ''));
-    sh.fragmentShader = '#define OUTDOOR_FILL\nuniform float uYardSun;\n' + (as ? 'uniform vec3 uSunTint;\nuniform vec3 uSunAs;\n' : '') + (lamps ? f : noLamps(f));
+    if (lamps) f = f.replace(FILL_OUT, FILL_BY_SIDE);
+    f = f.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>' + EYE_ON_REFLECTIONS).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= uYardEye;');
+    sh.fragmentShader = '#define OUTDOOR_FILL\nuniform float uYardSun;\nuniform float uYardEye;\n' + (lamps ? 'uniform vec4 uIndoorSide;\n' : '') + (as ? 'uniform vec3 uSunTint;\nuniform vec3 uSunAs;\n' : '') + (lamps ? f : noLamps(f));
   };
   m.customProgramCacheKey = () => key() + (lamps ? '|outdoorSun' : '|outdoors') + (as ? '|sunAs' : '');
   m.needsUpdate = true;
@@ -391,11 +423,18 @@ export function outdoorsOnly(root, rooms) {
   root.traverse((o) => {
     if (!o.isMesh) return;
     box.makeEmpty().expandByObject(o, false);
-    const indoors = rooms.some((r) => box.max.x > r.x0 + 0.02 && box.min.x < r.x1 - 0.02 && box.max.z > r.z0 + 0.02 && box.min.z < r.z1 - 0.02 && box.min.y < 2.51); // (2.51: the ceilings' height; the roof's soffit and fascia over the rooms are out of doors — lit as indoors they shone, seen from the yard: user, 2026-10-20)
+    const indoors = rooms.some((r) => box.max.x > r.x0 + 0.02 && box.min.x < r.x1 - 0.02 && box.max.z > r.z0 + 0.02 && box.min.z < r.z1 - 0.02 && box.min.y < 2.51) // (2.51: the ceilings' height; the roof's soffit and fascia over the rooms are out of doors — lit as indoors they shone, seen from the yard: user, 2026-10-20)
+      // (and what lies wholly on the room's side of its walls' faces, however thin: the kitchen's tiles on its two outer
+      // walls, a socket's plate, the paper's wear on the corridor's end wall — under 2 cm proud of the wall they had counted as
+      // out of doors, and no lamp lit them: found 2026-11-11, when the open air's fill stopped being the house's own
+      // for an eye indoors and they shone). Not a mesh with nothing in it yet — the short grass, whose blades are chosen
+      // each frame (yard.js shortGrass: count 0 here): its box is empty, every side of it ±Infinity, and passed this as
+      // "wholly inside"; the lawn's blades took the house's dim fill and every lamp — black in the shade (user, 2026-11-11)
+      || (!box.isEmpty() && rooms.some((r) => box.min.x > r.x0 - 0.002 && box.max.x < r.x1 + 0.002 && box.min.z > r.z0 - 0.002 && box.max.z < r.z1 + 0.002 && box.min.y > -0.002 && box.max.y < 2.51));
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) seenIndoors.set(m, seenIndoors.get(m) || indoors);
   });
   let n = 0;
-  for (const [m, indoors] of seenIndoors) if (!indoors && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) { outdoorLit(m); n++; }
+  for (const [m, indoors] of seenIndoors) if (!indoors && !m.userData.indoors && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) { outdoorLit(m); n++; } // (`userData.indoors`: said to be the rooms', where it lies in a wall — the inner half of the back door's threshold)
   return n;
 }
 

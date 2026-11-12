@@ -197,3 +197,23 @@ bottom. Every round adds its points to the version in progress (see CLAUDE.md, r
   skirt; a few weeds among the longest of it. Short real grass all over the lawn, between and under the tufts: small,
   close, even clumps of mown blades (not strips), coloured from the lawn, thinning on worn spots and the path, none
   on bare earth or leaf heaps, never into anything standing or lying there (the fence, posts, steps, the torch...).
+
+## 0.5.11 — faster for players, the eye out of doors, no freeze at the taps (2026-11-09 → 12)
+- 9–12 November (rounds 1–5): the game lags less and loads faster with the same picture — lamps skipped where they
+  give nothing (corridor 28 → 19.5 ms a frame, kitchen 39 → 27, living room 32.5 → 20), the rooms' contents not drawn
+  behind their walls from the yard, Mum and the angel sent for at the start and the shaders begun as soon as the world
+  is built (a first visit 32 → ~20.5 s). Luna in the bathroom: with the taps on she comes and sits looking at you,
+  follows you, sits when you stop; she stops and watches her boat come up beside her till she jumps in; a splash as
+  she dives, then she comes to your face for 5 s; the water 20 % faster; she leaves the bathroom with you, then the
+  door shuts. The loading window: a bar of green blocks, then a Start button. Going out into the yard the eye adjusts
+  as from a dark room into daylight (quick going out, slower coming back); the yard seen from indoors no longer near
+  black in the shade; no black on the short grass. No freeze on a first visit as the taps open, the water spreads or
+  Luna gets into her boat and suit (readied while loading and behind the start window: ~3 s more loading). No flashes
+  of sunlight in the corridor's far right corner as you walk; no bright line round the attic hatch.
+
+## 0.5.12 — Luna never shut in, the pool's waterline (2026-11-12 →, in progress)
+- 12 November (round 1 of 5, written at his request): Luna is never shut in the bathroom — the door waits till she is
+  out, also when you go in and straight out while she is still on her way, or shut it yourself from outside (she comes
+  out first); a door shut across her way stops her instead of her walking through it. At your heel with the taps on she
+  no longer shakes when you walk onto her by a wall. The pool's water no longer meets its walls on a hard line: its
+  green goes on a few centimetres up the wall, fading out unevenly, with duckweed stuck just above the water.

@@ -108,9 +108,18 @@ Read the part you need before touching any of these things, and keep it up to da
   keep foliage to what can be seen (the willow drops the shoots hidden behind its curtain). Measure with nothing
   else drawing on the GPU: with another copy of the game open (another chat's preview) even the bedroom fell to
   24 fps; alone, everything ran at 60.
-- **Light out there**: `YARD_LIGHT` (house.js, 1 — back from 0.72 on 2026-10-28) dims the yard to the eye while you're out in it (the
-  sky dims less); indoors nothing changes. `outdoorLight` fits each shadow box to house + yard + 17.5 m
-  crowns. Camera far plane 50.
+- **Light out there**: `YARD_LIGHT` (house.js, 1 — back from 0.72 on 2026-10-28) is how bright the yard is to you
+  out in it. **One exposure for everything out of doors** (2026-11-11, "the passage must be realistic"): `gain`
+  (house.js update) is 1.8 for an eye indoors or down in the cellar and `YARD_LIGHT` out in the yard, and scales
+  alike the sun and sky on outdoor materials (`YARD_SUN`), the open air's fill (`hemiOut`: always the yard's blue
+  one, never the house's), what they reflect and what glows (`YARD_EYE`: build.js `outdoorSun`) and the sky, far
+  trees, clouds and glow (`yard.brighten`). So the yard seen from indoors is the yard you stand in, 1.8 times as
+  bright; stepping out it is all too bright and settles — 60 % in a third of a second (the pupil), the rest over ~3 s
+  (the retina) — and back indoors it grows bright again over 6–8 s. Indoors nothing changes; the rooms seen from the
+  yard look as from inside (his, 2026-10-20). The back door takes the house's fill on the face turned into the
+  kitchen while shut (`userData.indoorSide`); its threshold is in two pieces, the inner one the room's
+  (`userData.indoors`); window panes' sheen stays as it is to every eye (`sameToEveryEye`). `outdoorLight` fits each
+  shadow box to house + yard + 17.5 m crowns. Camera far plane 50.
 - **House outside**: hipped shingle roof (`hipRoof`) over the main block, flat pieces = soffit/fascia and
   the wings' roofs; rusty galvanised half-round gutters (yard and street sides) and downpipes
   (`rustyMetalTex`); back door with an aluminium threshold (2026-10-19, after his photo — shape only: opens OUT into the yard over the doormat, its leaf 2.8 cm off the floor; green paint peeling (`peelingPaintTex`), big pane with a lace curtain inside (`laceTex`), below a grille of big squares with a rusted, torn wire screen behind it you half see through (`wireScreenTex` as alphaMap, `wireScreenWearTex`), wide peeling white casing with a drip cap (`worn` in `hingedDoor`); lit by the kitchen lamp too; no sidelights — the kitchen units stand right against both jambs inside); the yard-side walls peeling white clapboard (`peelingSidingTex`, 2.64 m floor to roof, worst low down); the flamingos' eyes keep the 16:00 yellow's hue (`eyeYellow`: compensated by the sun's colour) but at 0.6 of it, rough 0.7, and take shadows (2026-10-20: they looked lit on their own in the shade); the tap (flange, valve, spout down, red wheel)
@@ -175,11 +184,25 @@ Read the part you need before touching any of these things, and keep it up to da
   Its lamp: unshadowed, 2.8 m reach, dark most of the time and fighting to come on — a failing supply: the glow
   follows its target with a filament's lag (up 45 ms, down 90 ms) and wavers while lit, never snapping.
 - **`js/boat.js`**: Luna's boat comes up right beside her wherever she is in the bathroom (by the door only if she
-  isn't in there or there's no room by her). When the bathroom is full: she stands up in the boat, the suit goes on,
-  a crouch, a leap off the bow (`splash` jump), and only then swims; `cat.dive` never starts while she rides.
+  isn't in there or there's no room by her). She stops where she is (walking or not), turns only as far as her head
+  needs and watches it come up till she jumps in (`cat.watch`); it waits where it came up and never follows her (from
+  by the door it rows over to her as she stands). When the bathroom is full: she stands up in the boat, the suit goes
+  on, a crouch, a leap off the bow (`splash` jump), and only then swims; `cat.dive` never starts while she rides.
+  Where her helmet meets the water: `bath.splash` (`js/splash.js`) — the push and rings, her body and tail through, a
+  crown of drops (more the way she goes), the hole closing with a little jet, white water spreading out and gone in
+  1.8 s (seen from under too), and her air coming back up as bubbles. Then she swims straight to you (×1.6), over your
+  head or under your feet if she must (you are a block to her ways in the water), and hangs in front of your face
+  looking at you for 5 s (`dive.greet`; the 5 s count only there: you move, she follows), then about her business.
 - **The bath's cycle** (2026-11-02): going in, you can't shut the bathroom door till Luna is in ("It won't budge.");
   then it shuts itself (main.js `bathShut`). The taps turn on only with her in and the door shut (`bath.mayOpen`),
-  both at once, and never off by hand ("It won't turn."). The room fills ×1.25 faster from half its height (1.25 m).
+  both at once, and never off by hand ("It won't turn."). The water runs 20% faster than it first did (bath.js `PACE`
+  1.2: the bath, the floor, the room, the falling stream and the sheet over the front; not the 8 s drain): the boat
+  comes up 37.5 s after the taps (was 45). The room fills ×1.25 faster from half its height (1.25 m).
+  From the taps till the boat comes up she keeps by you (`cat.heel`, `heelAlong`): to ~0.7 m off you on her side, at
+  her own walk (0.5 m/s; not your pace: user, 2026-11-11), and sits facing you, looking at you, when you stop; up a moment after you move more than a step (at once
+  if you come at her). Going out (2026-11-11): the moment you are through the doorway she comes straight out after you
+  (`hurryTo` a spot just outside, your way), and once you are both clear of the doorway it slams shut behind you as it
+  does going in (main.js `bathDoorAfter`); never with her still in there.
   While the taps run the door won't open till the water is at the ceiling; opened then, all the water goes back in 8 s
   (`bath.drain`): down to the floor (0–45% of it), off the floor and back up over the bath's front (45–72%), the bath
   down its plugged plug hole with a whirl over the plug (68–100%); then the taps shut and the door opens. The boat goes

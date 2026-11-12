@@ -36,7 +36,8 @@
           <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> run · <kbd>C</kbd> crouch</li>
           <li><kbd>I</kbd> inventory · <kbd>Esc</kbd> pause · <kbd>M</kbd> sound on/off</li>
         </ul>
-        <button id="start-btn" type="button" disabled>Enter</button>
+        <div id="start-load" class="load-bar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="start-fill" class="load-fill"></div></div>
+        <button id="start-btn" type="button" disabled hidden>Start</button>
         <p id="start-status" class="win-status">Loading…</p>
       </div>
     </div>

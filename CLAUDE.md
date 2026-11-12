@@ -54,9 +54,9 @@ reworking anything recent, and before reporting something as new).
 14. **Versions** (`notes/versions.md`): one decimal per new playable block (0.5, …), a third number per batch of
     refinements (0.4.3, …). Write them **once every 5 rounds of edits**: at the 5th, add the points of all 5, in
     English and short, to the version in progress (the one exception to rule 13); in between, say in the reply which
-    round of the 5 it was. Counting: the last write was 2026-11-04 (0.5.10); round 1 was 2026-11-09/10 (speed for
-    players, its points in `notes/history.md`); next is round 2. When a round brings a new playable block or
-    completes a batch, propose the next number and let him decide. Current: **0.5.10**.
+    round of the 5 it was. Counting: 0.5.12 opened 2026-11-12 at his request ("update to version 0.5.2", read as
+    0.5.12: his to confirm), round 1 written straight away; next is round 2. When a round brings a new playable block
+    or completes a batch, propose the next number and let him decide. Current: **0.5.12**.
 15. **Repeated details are each different** ("they all have the same cut"): cracks, breaks, chips, placements of
     anything there are many of get their own dice one by one, unless he fixes counts and places (rule 12).
 16. **Keep it fast without losing quality** (his standing wish, 2026-11-10: "as I keep working I want Claude to reason
@@ -119,7 +119,8 @@ reworking anything recent, and before reporting something as new).
 - House: `house.js` (`PLAN`, rooms, doors: `hingedDoor`), `fixtures.js` (toilet, bath, basin, taps, sofa, TV, rug,
   ceiling lights…), `build.js` (metric UVs, walls with holes, `bakeStatic`, shadow helpers, early shaders), `bath.js`
   (taps: E on either turns both on, never off; filling, flood, underwater, towel, `drain`), `boat.js` (Luna's boat, sou'wester, diving gear), `uvtorch.js`,
-  `water.js` (the water's look; `RippleSim`: stir it with `bath.disturb(x, z, amp, r)`), `mother.js` (Mum; how to
+  `water.js` (the water's look; `RippleSim`: stir it with `bath.disturb(x, z, amp, r)`), `splash.js` (something diving
+  in: `bath.splash(x, z, yaw)`), `mother.js` (Mum; how to
   work on her: `notes/history.md`, "Mum").
 - Outside: `yard.js` (garden, neighbours, street, flamingos, tap), `hose.js`, `grove.js` (the wood, `WIND`), `pool.js`
   (the end of the garden, the angel), `basement.js`.
@@ -165,6 +166,9 @@ other preview of the game open; things fixed in a place he chose stay exactly th
   material; a big mesh seen in part is cut in pieces (`inPieces`); foliage only where it can be seen.
 - Something that moves or animates: works only while in view or in use, and wakes shadows only while it moves.
 - Something that moves to another scene later: add it to `prepareShaders`' `jobs` (main.js).
+- Something that waits hidden until its moment, a new picture drawn off screen (a mirror, a screen in the game), a
+  material cut by clipping planes: into the rehearsal (main.js `rehearse`'s `jobs`, `beginCut`; `notes/tech.md`,
+  Traps and Loading), or on a first visit the game stops the first time it shows (never seen here: only by players).
 - A file over the network: `fetchEarly` + `arrive()`. A build step of a second or more: its own `breathe`.
 - Then look: draws and GPU time in the views it shows in, and the loading time, against these numbers (M2,
   1920×1140, 2026-11-10; GPU ms / draws a frame): bedroom 15 / 750 · corridor 19.5 / 550 · kitchen 27 / 430 · living
@@ -175,7 +179,8 @@ other preview of the game open; things fixed in a place he chose stay exactly th
 ## Working cheaply (he is on a usage limit)
 
 - Run: launch config `2003` in `.claude/launch.json` (port 8141, `serve.py`); `2003-alt` (8142), `2003-3` (8143) when
-  8141 is taken. `?shot=1` skips the start window. For measuring: `tools/measure-server.py` (`notes/tech.md`).
+  8141 is taken. `?shot=1` skips the start window. For measuring: `tools/measure-server.py` (`notes/tech.md`), as
+  launch config `2003-measure` (8151).
 - Syntax check: copy the file to a `.mjs` in the scratchpad and `node --check` it.
 - Check visually with `tools/harness.js` + `tools/snap-receiver.py` (the routine is at its top). **Few images**: one
   `grid()` of 2–4 views per change; prefer reading values in JS (counts, distances, collider lists).

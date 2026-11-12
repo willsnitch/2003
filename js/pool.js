@@ -937,7 +937,7 @@ function buildPool(yardG, M, ctx, { moss: mossYard, mossNoise, stoneMap, topAt: 
     const g2 = fbm(x * 11 + 4, z * 11 + 9, 0.4, 2);
     return clamp(0.3 + (1 - S(d, 0.0, 0.8)) * 0.4 + (n - 0.5) * 0.9 + (f - 0.5) * 0.45 + (g2 - 0.5) * 0.3 + S(-z, -POOL.zc - 1, -PZ0) * 0.25, 0, 1);
   };
-  const { map, rough } = T.poolWaterTex(W, D, scum);
+  const { map, rough } = T.poolWaterTex(W, D, scum, (xm, ym) => Math.max(0, -sdLocal(POOL.x0 + xm, PZ0 + ym))); // (and how far from the wall)
   const shape = new THREE.Shape(ring(-0.001, 0.05).map(([x, z]) => new THREE.Vector2(x, -z)));
   const wgeo = new THREE.ShapeGeometry(shape, 4).rotateX(-Math.PI / 2);
   const wuv = wgeo.attributes.uv, wp = wgeo.attributes.position;

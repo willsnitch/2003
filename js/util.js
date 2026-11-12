@@ -81,8 +81,14 @@ export function fetchEarly(url) {
 }
 export function breathe(share) {
   if (share != null) {
-    const el = document.getElementById('start-status');
+    const el = document.getElementById('start-status'), fill = document.getElementById('start-fill');
     if (el) el.textContent = `Loading… ${Math.round(share * 100)}%`;
+    if (fill) {
+      // the bar, in whole blocks (a block and its gap: 10 px; styles.css)
+      const bar = fill.parentElement, blocks = Math.floor((bar.clientWidth - 6) / 10);
+      fill.style.width = `${Math.min(blocks, Math.round(share * blocks)) * 10}px`;
+      bar.setAttribute('aria-valuenow', String(Math.round(share * 100)));
+    }
   }
   return new Promise((r) => {
     if (document.hidden) { // (no frames in a tab out of sight, and its timers slowed to one a second)

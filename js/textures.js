@@ -7134,7 +7134,17 @@ export function poolWallTex(len, depth, water, marks = [], seed = 5151) {
       c = [c[0] * (1 - 0.55 * nearWater) + 40 * nearWater, c[1] * (1 - 0.45 * nearWater) + 58 * nearWater, c[2] * (1 - 0.65 * nearWater) + 18 * nearWater];
       if (y > water) { const d = Math.min(1, (y - water) / 0.05); c = c.map((ch, i) => ch * (1 - d) + [34, 42, 26][i] * d); } // under the water
       const dark = THREE.MathUtils.smoothstep(y, band + 0.1, water) * 0.25; // darker down to the water
-      return c.map((ch) => ch * (1 - dark));
+      c = c.map((ch) => ch * (1 - dark));
+      // the waterline itself (user, 2026-11-12: the water's edge "less sharp against the wall… a little fading into the
+      // green"): wet and green from the water up, the water's own film where they meet, thinning out upwards — 4 to 17 cm
+      // up, higher in some runs than others along the wall — into the slime band over it
+      const up = water - y;
+      if (up < 0.2) {
+        const reach = 0.04 + pfbm(L, x / 8 + 0.47, 0.13, 20, 1, 3) * 0.13 + (n2 - 0.5) * 0.03;
+        const wet = (1 - THREE.MathUtils.smoothstep(up, 0, reach)) ** 1.6, f = 0.85 + n * 0.3;
+        for (let i = 0; i < 3; i++) c[i] = c[i] * (1 - wet) + WATERLINE[i] * f * wet;
+      }
+      return c;
     });
     // streaks run down from the tiles, dark, where the rain off the coping goes
     for (let i = 0; i < len * 9; i++) {
@@ -7186,23 +7196,44 @@ export function poolWallTex(len, depth, water, marks = [], seed = 5151) {
     g.fillStyle = 'rgba(30,34,28,0.85)'; // the grout lines
     for (let i = 0; i <= n; i++) g.fillRect(i * TILE * sx - 1.2, 0, 2.4, band * sy);
     g.fillRect(0, band * sy - 1.5, w, 3);
+    // duckweed left stuck to the wall just over the water, thick at the line and thinning out within a few cm, in
+    // drifts as on the water (its own dice)
+    const rd = mulberry32(seed + 77);
+    for (let i = 0; i < len * 110; i++) {
+      const x = rd() * w, up = rd() ** 2.4 * 0.05, drift = pfbm(L, x / sx / 8 + 0.21, 0.71, 12, 1, 2);
+      if (rd() > drift * 1.6 - 0.2) continue;
+      const v = rd();
+      g.fillStyle = `rgba(${Math.round(78 + v * 40)},${Math.round(100 + v * 40)},${Math.round(30 + v * 14)},${0.5 + rd() * 0.4})`;
+      g.beginPath(); g.ellipse(x, wy - up * sy, 0.7 + rd() * 0.9, 0.5 + rd() * 0.5, rd() * 3, 0, Math.PI * 2); g.fill();
+    }
   });
 }
+/** The colour where the pool's water meets its wall: the green of its scum, matted against the wall (poolWallTex,
+ *  poolWaterTex — the darker olive of the water's film drew a dark line round it). */
+const WATERLINE = [68, 84, 32];
 
 /**
  * The stagnant water's face, over the pool's footprint (`W` × `D` metres; top of the picture its far end): almost black
  * green-brown water, duckweed spread over it in drifts — thick against the walls and in the far, rounded end, where
  * the air pushed it — algae in mats, a few open patches of black water, seeds and bits. Returns { map, rough }.
  */
-export function poolWaterTex(W, D, scum) {
+export function poolWaterTex(W, D, scum, edge = null) {
   const S = 160, w = Math.round(W * S), h = Math.round(D * S), r = mulberry32(5161);
-  const amount = new Float32Array(w * h);
+  const amount = new Float32Array(w * h), rim = new Float32Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) amount[y * w + x] = scum(x / S, y / S);
+  // against the wall (`edge`: metres from it), a fringe of the wall's own waterline colour, 2 to 7 cm wide, so the
+  // water doesn't stop dead at a line (user, 2026-11-12)
+  if (edge) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const d = edge(x / S, y / S);
+    if (d < 0.08) rim[y * w + x] = (1 - THREE.MathUtils.smoothstep(d, 0, 0.02 + fbm(x * 0.04 + 3.1, y * 0.04 + 1.7, 0.9, 2) * 0.05)) ** 1.3 * 0.8;
+  }
   const map = canvasTex(w, h, (g) => {
     perPixel(g, w, h, (u, v, px, py) => {
-      const a = amount[py * w + px], n = fbm(px * 0.08, py * 0.08, 0.3, 2);
+      const a = amount[py * w + px], n = fbm(px * 0.08, py * 0.08, 0.3, 2), k = rim[py * w + px];
       const mat = THREE.MathUtils.smoothstep(a, 0.25, 0.85) ** 1.3; // (algae, a film thickening into mats)
-      return [16 + n * 10 + mat * (48 + n * 30), 20 + n * 10 + mat * (58 + n * 34), 13 + n * 6 + mat * (18 + n * 8)];
+      const c = [16 + n * 10 + mat * (48 + n * 30), 20 + n * 10 + mat * (58 + n * 34), 13 + n * 6 + mat * (18 + n * 8)];
+      if (k) for (let i = 0; i < 3; i++) c[i] = c[i] * (1 - k) + WATERLINE[i] * (0.85 + n * 0.3) * k;
+      return c;
     });
     for (let i = 0; i < w * h * 0.09; i++) { // duckweed: each frond a tiny bright oval, in colonies thinning out at their edges
       const x = r() * w, y = r() * h, a = amount[Math.floor(y) * w + Math.floor(x)];
@@ -7218,7 +7249,7 @@ export function poolWaterTex(W, D, scum) {
       g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
     }
   });
-  const rough = canvasTex(w, h, (g) => perPixel(g, w, h, (u, v, px, py) => { const k = Math.round((0.05 + 0.85 * THREE.MathUtils.smoothstep(amount[py * w + px], 0.15, 0.5)) * 255); return [k, k, k]; }), { data: true });
+  const rough = canvasTex(w, h, (g) => perPixel(g, w, h, (u, v, px, py) => { const i = py * w + px, k = Math.round((0.05 + 0.85 * Math.max(THREE.MathUtils.smoothstep(amount[i], 0.15, 0.5), rim[i] / 0.8)) * 255); return [k, k, k]; }), { data: true });
   return { map, rough };
 }
 

@@ -14,6 +14,17 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const { lerp, clamp } = THREE.MathUtils;
 
 const WALK = 0.5, TROT = 1.15, RUN = 2.2, TURN = 5.5, SWIM = 0.22;
+const NEAR = 0.42; // at your heel, you this near: up and out of your way (heelAlong); she sits down only further off
+/** Whether going straight from (ax, az) to (bx, bz) takes her through the door leaf `c` (a segment collider), its ends
+ *  carried on a little (a hair past the latch side is still the door). */
+function throughDoor(ax, az, bx, bz, c) {
+  const ux = c.bx - c.ax, uz = c.bz - c.az, l = Math.hypot(ux, uz) || 1, ex = (ux / l) * (c.r + 0.03), ez = (uz / l) * (c.r + 0.03);
+  const px = c.ax - ex, pz = c.az - ez, qx = c.bx + ex, qz = c.bz + ez;
+  const side = (x0, z0, x1, z1, x, z) => (x1 - x0) * (z - z0) - (z1 - z0) * (x - x0);
+  const s1 = side(px, pz, qx, qz, ax, az), s2 = side(px, pz, qx, qz, bx, bz);
+  const s3 = side(ax, az, bx, bz, px, pz), s4 = side(ax, az, bx, bz, qx, qz);
+  return s1 * s2 < 0 && s3 * s4 < 0;
+}
 const SEEN = new THREE.Vector3();
 const BODY_UP = 0.47; // how far up from her feet she goes, swimming, helmet and all
 export const CLIPS = 24; // planes she can be cut by, in her boat or her diving bubble (boat.js)
@@ -469,6 +480,7 @@ export class Cat {
     this.dive = null;
     this.swimming = null; // { q, speed, pitch, inside }
     this.boarded = false; // she has just landed from a jump that was getting in
+    this.heel = false; // at your heel (the bath's taps on, her boat not up yet: boat.js; the 'heel' step)
     this.apart = 0;
     this.waitApart = between(1.5, 3.5);
 
@@ -484,6 +496,7 @@ export class Cat {
     this.root.traverse((o) => { if (o.material) o.material.clippingPlanes = this.clips; });
     this.obstacles = []; // things that move that she must keep out of, as colliders (her boat)
     this.swinging = []; // doors that swing out into the room (house.js: the fridge's), as colliders
+    this.doors = []; // the doors her ways go round, as segment colliders (main.js): one shut across her way since she set off
     this.pressed = false; // pushed back against the way she was going, last frame (keepClear)
     this.update(0, 0);
   }
@@ -638,10 +651,26 @@ export class Cat {
     if (need > RUN && this.unseen) this.skipAlong(s.path, (need - RUN) * dt);
   }
 
-  /** `d` metres on along her path at once, facing along it. */
+  /**
+   * Her way still open: a door shut across it since it was worked out (user, 2026-11-12: the bathroom's slammed as she
+   * came along the corridor, and she walked on in through it and was shut in) and it is worked out again — round some
+   * other way, or, with none, she stops this side of it. False once there is nowhere left to go.
+   */
+  wayOpen(s) {
+    if (!s.path.length) return false;
+    const cross = (p) => this.doors.some((c) => throughDoor(this.pos.x, this.pos.z, p[0], p[1], c));
+    if (!cross(s.path[0])) return true;
+    const [ex, ez] = s.path[s.path.length - 1];
+    s.path = this.nav.path(this.pos.x, this.pos.z, ex, ez) ?? [];
+    if (s.path.length && cross(s.path[0])) s.path.length = 0;
+    return s.path.length > 0;
+  }
+
+  /** `d` metres on along her path at once, facing along it (never through a door: wayOpen). */
   skipAlong(path, d) {
     while (d > 0 && path.length > 1) {
       const [tx, tz] = path[0], dx = tx - this.pos.x, dz = tz - this.pos.z, l = Math.hypot(dx, dz);
+      if (this.doors.some((c) => throughDoor(this.pos.x, this.pos.z, tx, tz, c))) return;
       if (l > 1e-4) this.yaw = Math.atan2(dx, dz);
       if (l <= d) { this.pos.x = tx; this.pos.z = tz; d -= l; path.shift(); }
       else { this.pos.x += (dx / l) * d; this.pos.z += (dz / l) * d; d = 0; }
@@ -753,6 +782,106 @@ export class Cat {
     this.shy = 4;
   }
 
+  /**
+   * At your heel (user, 2026-11-11: the bath's taps on, "Luna comes near you and sits looking at you; if you move, she
+   * follows you, and sits when you stop"): to a spot a little way off you, on her side of you, at your pace; there, once
+   * you have stopped, round to face you and down she sits, looking at you; up again a moment after you move off. She
+   * walks, whatever your pace.
+   */
+  heelAlong(H, dt) {
+    const pl = this.player.pos, dx = pl.x - this.pos.x, dz = pl.y - this.pos.z, d = Math.hypot(dx, dz);
+    if (!H.you) { H.you = [pl.x, pl.y]; H.pace = 0; H.mode = 'go'; H.speed = WALK; }
+    // how fast you are going, smoothed
+    const v = Math.hypot(pl.x - H.you[0], pl.y - H.you[1]) / Math.max(dt, 1e-4);
+    H.you[0] = pl.x; H.you[1] = pl.y;
+    H.pace += (v - H.pace) * (1 - Math.exp(-dt * 6));
+    if (H.mode === 'sit') {
+      this.target = POSES.sit;
+      this.lookMode = 'player';
+      // you have moved off (more than a step from where you stood as she sat down), or come right up to her — you, not
+      // she: by a wall her turn to face you can nudge her a few cm your way. (Right up to her was within 0.55 m, nearer
+      // than the wall let her get: she got up the moment she sat and sat the moment she was up, every frame, shaking —
+      // user, 2026-11-12. Now NEAR, nearer than she ever sits down, and only by your stepping in.)
+      const stepped = Math.hypot(pl.x - H.at[0], pl.y - H.at[1]), atHer = d <= NEAR && stepped > 0.05;
+      if (stepped <= 0.45 && d <= 1.3 && !atHer) H.react = between(0.25, 0.6);
+      else if ((H.react -= dt) <= 0 || atHer) { H.mode = 'go'; H.path = null; } // (coming at her: up at once, out of your way)
+      return;
+    }
+    if (H.mode === 'turn') {
+      // round on the spot to face you, then down
+      const off = wrap(Math.atan2(dx, dz) - this.yaw), turn = clamp(off, -TURN * 0.7 * dt, TURN * 0.7 * dt);
+      this.yaw += turn;
+      this.gait += Math.abs(turn) * 1.4;
+      this.speedNow = Math.max(this.speedNow, 0.25);
+      this.lookMode = 'player';
+      H.turned = (H.turned ?? 0) + dt;
+      if (H.pace > 0.3) { H.mode = 'go'; H.path = null; } // off again before she was down
+      else if (Math.abs(off) < 0.08 || H.turned > 2) { H.mode = 'sit'; H.at = [pl.x, pl.y]; H.react = between(0.25, 0.6); }
+      return;
+    }
+    // on her way: to about 0.7 m off you, on her side of you (the nearest free floor along that line, or beside it)
+    this.target = POSES.stand;
+    this.lookMode = d < 1.8 ? 'player' : 'ahead';
+    H.repath = (H.repath ?? 0) - dt;
+    if (!H.path || H.repath <= 0) {
+      // her side of you: the way she is from you (right under your feet, the way she was last, or on ahead of her)
+      if (d > 0.12) H.away = [-dx / d, -dz / d];
+      const [ux, uz] = H.away ?? [Math.sin(this.yaw), Math.cos(this.yaw)];
+      // only where she can walk to in a straight line from where she is (the same room: through a wall or a shut door,
+      // there was no way there and she stayed put under your feet), then anywhere free
+      const from = this.nav.free(this.pos.x, this.pos.z) ? [this.pos.x, this.pos.z] : this.nav.centre(this.nav.nearest(this.pos.x, this.pos.z));
+      let goal = null;
+      for (const straight of [true, false]) {
+        const ok = (gx, gz) => this.nav.free(gx, gz) && (!straight || this.nav.clear(from, [gx, gz]));
+        for (const [k, side] of [[0.7, 0], [0.55, 0], [0.85, 0], [0.7, 0.25], [0.7, -0.25], [0.5, 0.35], [0.5, -0.35]]) {
+          const gx = pl.x + ux * k - uz * side, gz = pl.y + uz * k + ux * side;
+          if (ok(gx, gz)) { goal = [gx, gz]; break; }
+        }
+        // a wall at her back, nowhere on her side of you: round you, as near her side as there is free floor that far off
+        // (the nearest floor to her side had left her 0.4 m off you)
+        for (const k of [0.7, 0.6]) {
+          if (goal) break;
+          let best = -Infinity;
+          for (let a = 0; a < 24; a++) {
+            const cx = Math.sin((a / 24) * Math.PI * 2), cz = Math.cos((a / 24) * Math.PI * 2), gx = pl.x + cx * k, gz = pl.y + cz * k;
+            const score = cx * ux + cz * uz;
+            if (score > best && ok(gx, gz)) { best = score; goal = [gx, gz]; }
+          }
+        }
+        if (goal) break;
+      }
+      goal ??= this.nav.centre(this.nav.nearest(pl.x + ux * 0.7, pl.y + uz * 0.7));
+      H.path = this.nav.path(this.pos.x, this.pos.z, goal[0], goal[1]) ?? [];
+      H.repath = 0.45;
+    }
+    H.speed = WALK; // at her own pace, a walk, never yours (user, 2026-11-11)
+    const there = this.followPath(H, dt);
+    if ((there || d < 0.85) && d > NEAR + 0.05 && H.pace < 0.15) { H.mode = 'turn'; H.turned = 0; } // (never down as near as she gets up again)
+  }
+
+  /**
+   * Stop where she is and watch `p` (her boat coming up: boat.js keeps `lookPoint` on it). User, 2026-11-11: "if she is
+   * walking she stops and looks towards the boat until she jumps in". Sitting with it in sight, she stays sitting.
+   */
+  watch(p) {
+    const off = wrap(Math.atan2(p.x - this.pos.x, p.z - this.pos.z) - this.yaw);
+    const down = this.target === POSES.sit || this.target === POSES.loaf;
+    this.lookPoint.copy(p);
+    this.groom.on = false;
+    this.heel = false;
+    // turned only as far as her head needs to be on it (it turns 1.25 rad): it comes up right beside her, and turned
+    // square to it her nose went into its side (Cat.keepClear pushed her off, sliding)
+    const turn = Math.sign(off) * Math.max(0, Math.abs(off) - 1.2);
+    this.queue = down && !turn
+      ? [{ type: 'pose', pose: this.target === POSES.loaf ? 'loaf' : 'sit', dur: 60, look: 'point', watch: true }]
+      : [{ type: 'pose', pose: 'stand', dur: 0.2, look: 'point', watch: true }, ...(turn ? [{ type: 'face', yaw: this.yaw + turn, watch: true }] : []), { type: 'pose', pose: 'stand', dur: 60, look: 'point', watch: true }];
+  }
+
+  /** Watching something (watch). */
+  get watching() {
+    return !!this.queue[0]?.watch;
+  }
+
   /** Where her voice comes from. */
   get mouthAt() {
     return [this.pos.x, this.groundY + 0.3, this.pos.z];
@@ -785,7 +914,7 @@ export class Cat {
   }
 
   followPath(s, dt) {
-    if (!s.path.length) return true;
+    if (!this.wayOpen(s)) return true;
     // up against something on the last stretch (keepClear): that is as near as she gets
     const [ex, ez] = s.path[s.path.length - 1];
     if (this.pressed && s.path.length === 1 && Math.hypot(ex - this.pos.x, ez - this.pos.z) < 0.5) {
@@ -944,13 +1073,13 @@ export class Cat {
       const dx = tx - this.pos.x, dy = ty - this.groundY, dz = tz - this.pos.z, dh = Math.hypot(dx, dz);
       const off = wrap(Math.atan2(dx, dz) - this.yaw);
       if (dh > 0.05) this.yaw += clamp(off, -TURN * 0.3 * dt, TURN * 0.3 * dt);
-      want = Math.hypot(dh, dy) > 0.06 ? SWIM * (Math.abs(off) < 0.9 || dh < 0.05 ? 1 : 0.35) * (s.home ? 1.6 : 1) : 0; // quicker after you
+      want = Math.hypot(dh, dy) > 0.06 ? SWIM * (Math.abs(off) < 0.9 || dh < 0.05 ? 1 : 0.35) * (s.home || s.quick ? 1.6 : 1) : 0; // quicker after you, or to you
       vy = Math.sign(dy) * Math.min(Math.abs(dy) * 4, 1) * SWIM * 0.8; // straight up or down to it, not round in circles
       S.ahead = clamp(dh / 0.3, 0, 1); // and only as far forward as it is
       this.lookMode = 'ahead';
       // getting no nearer (something has come in the way): give it up and think again
       const left = Math.hypot(dh, dy);
-      if (left < (s.best ?? Infinity) - 0.02) { s.best = left; s.since = 0; } else s.since = (s.since ?? 0) + dt;
+      if (left < (s.best ?? Infinity) - 0.02) { s.best = left; s.since = 0; } else if (Math.abs(off) < 0.6 || dh < 0.05) s.since = (s.since ?? 0) + dt; // (turning round to it is no sign of being stuck: she kept giving up on you mid-turn)
       done = (dh < 0.07 && Math.abs(dy) < 0.06) || s.t > 25 || s.since > (s.free ? 4 : 1.5);
       if (s.since > (s.free ? 4 : 1.5)) S.q.length = 1; // stuck: the rest of the way is no good either — plan it again
     } else {
@@ -958,11 +1087,18 @@ export class Cat {
       if (s.look === 'player') {
         const off = wrap(Math.atan2(pl.x - this.pos.x, pl.y - this.pos.z) - this.yaw);
         this.yaw += clamp(off, -TURN * 0.25 * dt, TURN * 0.25 * dt);
-        if (s.t > 2 && Math.hypot(pl.x - this.pos.x, pl.y - this.pos.z) > 2.6) done = true; // you swam off
+        if (!s.stay && s.t > 2 && Math.hypot(pl.x - this.pos.x, pl.y - this.pos.z) > 2.6) done = true; // you swam off
       }
       this.lookMode = s.look;
       done ||= s.t > s.dur;
+      if (s.stay) {
+        // kept in front of your face: you moved, after you again (her 5 s count only there)
+        const [fx, fy, fz] = this.inFrontOfYou(D);
+        if (!done && (Math.hypot(fx - this.pos.x, fz - this.pos.z) > 0.32 || Math.abs(fy - this.groundY) > 0.22)) { S.q.unshift({ type: 'swim', at: 'player', quick: true }); s.t -= dt; }
+        if (done) D.greet = false; // greeted: about her business now
+      }
     }
+    if (D.greet) D.greetT = (D.greetT ?? 0) + dt;
     if (done) {
       S.q.shift();
       if (s.exit) {
@@ -1195,6 +1331,19 @@ export class Cat {
         if (near.length) { q.push({ type: 'swim', to: near[0], free: true }); return; }
       }
     }
+    // straight from her leap off the boat (boat.js sets `greet`): to you, quickly, and in front of your face, looking
+    // at you, 5 s (user, 2026-11-11); only then about her own business. Tried again if the way gets blocked, for a minute
+    // (at 0.35 m/s the far end of the room is 40 s off)
+    if (D.greet && youHere && (D.greetT ?? 0) < 60) {
+      const way = this.swimPath(D, here, this.inFrontOfYou(D));
+      if (way) {
+        for (const p of way.slice(0, -1)) q.push({ type: 'swim', to: p, quick: true });
+        q.push({ type: 'swim', at: 'player', quick: true });
+        q.push({ type: 'hover', dur: 5, look: 'player', stay: true });
+        return;
+      }
+    }
+    D.greet = false;
     if (youHere && rnd() < 0.3) {
       const front = this.inFrontOfYou(D), way = this.swimPath(D, here, front);
       if (way) {
@@ -1234,7 +1383,7 @@ export class Cat {
     const s0 = this.queue[0];
     this.shy -= dt;
     if (this.hurry) this.hurry.left -= dt;
-    if (this.shy <= 0 && this.groundY === 0 && this.player.feet < 0.2 && !this.air && s0?.type !== 'jump' && !s0?.hold &&
+    if (this.shy <= 0 && !this.heel && !this.watching && this.groundY === 0 && this.player.feet < 0.2 && !this.air && s0?.type !== 'jump' && !s0?.hold &&
         Math.hypot(pl.x - this.pos.x, pl.y - this.pos.z) < 0.3) this.bolt();
 
     // you went into another room: after a moment, she follows — but not out of doors: while you are out in
@@ -1250,6 +1399,9 @@ export class Cat {
       }
       if (out && mine && mine !== 'living' && !this.queue.some((s) => s.indoors || s.type === 'jump') && !this.air) this.stayIn();
     }
+    // at your heel: whatever she was doing (if she can break it off), and only that, till it is over
+    if (this.heel && this.queue[0]?.type !== 'heel' && !this.committed) { this.queue = [{ type: 'heel' }]; this.groom.on = false; }
+    if (!this.heel && this.queue[0]?.type === 'heel') this.queue.shift();
     if (!this.queue.length) this.plan();
     const s = this.queue[0];
     if (!s) return;
@@ -1303,6 +1455,9 @@ export class Cat {
       }
       case 'pose':
         done = this.holdPose(s, dt);
+        break;
+      case 'heel':
+        this.heelAlong(s, dt);
         break;
       case 'shake': {
         // shaking herself all over, quick, as a wet cat does (update); `then` early in it (boat.js: her suit gone)

@@ -330,6 +330,11 @@ and the current state; `notes/world.md` the approved state of the yard and the h
 - Copying the canvas after an `await` gives black (the picture is already handed over): step one frame right before
   `drawImage`, as `grid()` does. To judge something small at play distance, crop the full-size canvas round its
   projected point instead of zooming the camera.
+- A whole bath cycle in seconds (2026-11-11): step only `GAME.house.bath.update`, `GAME.cat.update` and
+  `GAME.boat.update` in a loop (dt 1/40, no drawing): taps to full is ~110 s of game time, a few seconds real. The
+  doors' logic (`bathShut`, `bathDoorAfter`) lives in main.js's tick: test it with `frames()`. In the water the player
+  floats only with `player.swimming` set (the plain loop never updates you), and sinks slowly unless held up: set
+  `player.feet` every frame for a fixed eye.
 
 ## Speed for players (2026-11-05)
 
@@ -374,3 +379,59 @@ and the current state; `notes/world.md` the approved state of the yard and the h
   key: 214 the same, 2 extra. Lesson: the bedroom's, begun before `twoFills` had changed the shared lighting chunk,
   kept the old chunk under the same key — 14 stale shaders, found only by comparing texts; "which shader a material
   has now" is not comparable between two loads (shared materials), the set of all programs by key is.
+
+## Luna in the bathroom, the loading bar (2026-11-11; round 2 of 5 for `versions.md`)
+
+- His points, as specs: once the taps are on Luna comes to you and sits looking at you, follows when you move, sits
+  when you stop; when the boat comes up she stops (if walking) and watches it till she jumps in — he had seen it come
+  up as she walked and follow her about (boat.js aimed it 0.75 m off her every frame in `wait`); a water animation
+  for her dive; after it she comes to your face and looks at you 5 s, then her usual things; the water 20% faster;
+  going out, she comes out with you and then the door shuts; the loading box with the green block bar of the time and,
+  loaded, a Start button (was Enter). State in `notes/world.md` (the boat, the bath's cycle).
+- Mine: the stream and the sheet over the bath's front run 20% faster too (not the drain); the door slams going out
+  as it does going in; at your heel I had her keep your pace — he wants her own walk, whatever yours; the bar drawn in CSS, in
+  whole blocks, as tall with its margins as the button that replaces it (the window jumped 14 px: collapsing margins); the
+  status line hidden once loaded and the button centred between the keys and the window's foot (it sat high).
+- Lessons: the first test showed her bolting from under your feet while watching the boat (4 m off, then back): no
+  bolting while she watches or keeps by you. The splash's bubbles were drawn a metre across for a frame (scale set
+  only in `update`). In the full room she stuck behind you for 14 s: the water is narrower than the room she keeps
+  off you, and her stuck-test fired while she turned. Facing the boat square, her nose went 6 cm into its side.
+  The rest in `notes/tech.md`.
+
+## The eye going out into the yard (2026-11-11; round 3 of 5 for `versions.md`)
+
+- His point: "a strange play of light as I go out into the garden; it means to do what the eye does going from a
+  dark room into daylight: judge whether it is done well and whether everything out there answers rightly. I want
+  the passage realistic."
+- Found (measured, the camera still, `house.outdoors` forced): stepping out the sky dimmed (×0.7 on screen) while
+  the shade lifted 1.2–7× and turned from brown to blue — the outdoor fill was the house's own (0.8, brown) for an
+  eye indoors and the open sky's (2.0, blue) out there, switched over 0.4 m at the door in a quarter of a second,
+  the sun and sky over two seconds; reflections (slide, puddles, pool) and the neighbours' lit windows never changed.
+- Done: one exposure for all of it (state in `notes/world.md`, "Light out there"); two paces out, slower in; the
+  cellar counts as the dark. Mine, forced by it: the back door's inner face and the inner half of its threshold keep
+  the house's fill; thin things on the inner faces of outer walls are the rooms' again (`notes/tech.md`, Traps).
+- Lesson: the old eye-dependent fill hid three mistakes at once (the yard dark from indoors, indoor tiles lit as
+  out of doors, the door's two faces sharing a fill). After the change, difference old against new from indoors
+  before believing "indoors nothing changes".
+- Same round, his second point: "what's this black on the blades? only on the short ones?" — mine: the new indoors
+  test let the short grass's empty box (no blades yet at the bake) through as "inside a room", so it lost the sky's
+  fill and took every lamp: black blades in the shade, 8 % of the lawn's pixels; the yard 2–4 ms slower too, which
+  I had reported without finding why. Fixed (`notes/tech.md`, Traps).
+
+## The freeze as the taps open (2026-11-11/12; round 4 of 5 for `versions.md`)
+
+His: "in the browser it lags when I open the water and Luna gets into the boat / the diving suit; Brave, on Netlify;
+it really stops to load".
+- Found (a first visit, `?cold`, frame by frame): 2.9 s as the taps opened, 1.2 s as the water went over the side,
+  ~1 s as it spread, 0.6 s as the boat came, 0.6 and 1.1 s as it came into view; nothing of it on later visits, which
+  is why it was never seen here. Two causes, both "left to the first draw": the card readies each shader again for
+  every kind of picture (the water's mirror is not the screen's kind), and `compile` made Luna's and her suit's
+  shaders for the wrong number of clipping planes, so the right ones were made in play (`notes/tech.md`, Traps).
+- Done: the rehearsal (main.js `rehearse`; `notes/tech.md`, Loading). The whole cycle run again cold, twice: no
+  shader made in play, the longest frame 81 ms (233 ms on first stepping into the bathroom, as into any room).
+- Lessons: the first plan (everything under the loading line) cost 18 s; the card does one thing at a time, so
+  nothing of it hides behind the shaders' compiling; what cannot be free is best done where nobody is waiting
+  (behind the start window, while the eye is still) and only the part that matters held for. And a two-load picture
+  test needs the same dice in both: three takes Math.random for every object, so one object more in one load moved
+  Luna's tail in the other — it looked like a change to her and was the test's.
+

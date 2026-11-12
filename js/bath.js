@@ -8,11 +8,13 @@ import * as T from './textures.js';
 import { canvasTex, fbm } from './util.js';
 import { roundRectShape, bathDuck } from './fixtures.js';
 import { bubbles } from './bubbles.js';
+import { diveSplash } from './splash.js';
 import { waterUniforms, waterSurface, PlanarReflection, CAUSTICS, RippleSim } from './water.js';
 
 const ONE_TAP = 60; // seconds for one tap to fill the bath from empty: two do it in half
 const SPREAD = 10; // seconds for one tap's overflow to cover the whole floor, however long it is
 const RISE = 0.005; // metres a second the bathroom fills with one tap running, once the floor is covered
+const PACE = 1.2; // the water runs 20% faster than the times above (user, 2026-11-11): the bath, the floor, the room, the stream
 const std = (o) => new THREE.MeshStandardMaterial(o);
 
 /**
@@ -89,6 +91,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
     return { m, v: new THREE.Vector3(), live: false, floor: 0 };
   });
   let splash = 0, rippling = 0;
+  // Luna diving in off her boat (boat.js): splash.js
+  const dive = diveSplash(g, { dropMat, foamMat, level: () => state.flood, roof: ceiling + 0.012, disturb: (x, z, a, r) => sim.disturb(x, z, a, r) });
   // under the water, the tap still running: bubbles out of the spout, rising, so you can see it is
   const tapBubbles = bubbles(g, 220, () => state.flood); // enough for a steady column all the way up
   let tapBubbling = 0;
@@ -466,6 +470,10 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) patchOne(m);
       });
     },
+    /** The same for materials that are on nothing yet (the paws of Luna's diving suit, boat.js: hers only while it is on). */
+    patchThese(materials) {
+      for (const m of materials) patchOne(m);
+    },
     /** Every frame: where your eye is, how high the room's water and the bath's stand. */
     update(eye) {
       volumeU.uWCam.value.copy(eye);
@@ -507,6 +515,10 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
     /** Something stirs the water at x, z: ripples run out from there, `amp` strong (0.05 a touch, 0.6 a splash), `r` metres across. */
     disturb(x, z, amp = 0.3, r = 0.05) {
       sim.disturb(x, z, amp, r);
+    },
+    /** Luna diving in at x, z, heading `yaw` (boat.js): the water thrown up, stirred, closing over her (splash.js). */
+    splash(x, z, yaw) {
+      dive.start(x, z, yaw);
     },
     /** Every frame: the ripples stepped on (main.js), while there is any water in here at all. */
     simulate(renderer, dt) {
@@ -603,7 +615,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         }
       } else if (flow) {
         // the bath fills; what comes in hot warms what is there, what comes in cold cools it
-        const room = rim - state.level, rise = ((rim - bottom) / ONE_TAP) * flow * dt;
+        const room = rim - state.level, rise = ((rim - bottom) / ONE_TAP) * flow * PACE * dt;
         const into = Math.min(room, rise), depth = Math.max(0.001, state.level - bottom);
         const mix = (state.hot ? 1 : 0) / flow;
         state.heat += (mix - state.heat) * Math.min(1, into / (depth + into) + dt * 0.01);
@@ -613,8 +625,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         // SPREAD — faster down a longer one — and the level rises at RISE however much water that takes; user,
         // 2026-10-19: "the room must fill in the time it did before")
         if (rise > room - 1e-6) {
-          if (state.spread < 1) state.spread = Math.min(1, state.spread + (flow * dt) / SPREAD);
-          else state.flood = Math.min(ceiling - 0.012, state.flood + RISE * flow * state.boost * (state.flood >= ceiling / 2 ? 1.25 : 1) * dt); // up past the door's top, the door shut, to the ceiling; a quarter faster from halfway up (user, 2026-11-02)
+          if (state.spread < 1) state.spread = Math.min(1, state.spread + (flow * PACE * dt) / SPREAD);
+          else state.flood = Math.min(ceiling - 0.012, state.flood + RISE * PACE * flow * state.boost * (state.flood >= ceiling / 2 ? 1.25 : 1) * dt); // up past the door's top, the door shut, to the ceiling; a quarter faster from halfway up (user, 2026-11-02)
         }
       } else state.heat = Math.max(0, state.heat - dt / 900); // cooling, slowly
       if (Math.abs(state.level - shapedAt) > 0.002) reshape();
@@ -627,7 +639,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       if (flow && !under) {
         const land = Math.max(state.level, endHit, state.flood), len = inlet.y - land, r = (flow > 1 ? 0.0085 : 0.006) * (state.boost > 1 ? 1.3 : 1); // fuller, running harder
         column.scale.set(r, len, r);
-        column.material.map.offset.y = (time * 2.6 * Math.sqrt(state.boost)) % 1;
+        column.material.map.offset.y = (time * 2.6 * PACE * Math.sqrt(state.boost)) % 1;
         column.material.map.repeat.set(1, len * 6);
         streamTime.value = time;
         // the foam, on water it lands in (not on the bare enamel)
@@ -665,6 +677,7 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
         }
       }
       tapBubbles.update(dt);
+      dive.update(dt);
       sink?.update(dt, time);
       for (const d of drops) {
         if (!d.live) continue;
@@ -699,8 +712,8 @@ export function bathWater(g, ctx, { tub, taps, floor, room, door, top, ceiling =
       }
       spillU.uTime.value = time;
       const way = drainT ? -1 : 1; // (going back: up it, into the bath)
-      runs.offset.y = (runs.offset.y - way * dt * 0.45) % 1; // running down (v grows downstream)
-      ripples.offset.y = (ripples.offset.y - way * dt * 1.35) % 1;
+      runs.offset.y = (runs.offset.y - way * dt * 0.45 * (drainT ? 1 : PACE)) % 1; // running down (v grows downstream)
+      ripples.offset.y = (ripples.offset.y - way * dt * 1.35 * (drainT ? 1 : PACE)) % 1;
       ripples.offset.x = Math.sin(time * 0.7) * 0.01;
       // the foam and the drops where it meets the floor's water
       const reach = Math.min(1, spillU.uCover.value * 0.85 + 0.03);

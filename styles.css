@@ -271,7 +271,7 @@ kbd {
 
 #start-btn {
   display: block;
-  margin: 0 auto;
+  margin: 25px auto 14px; /* centred between the keys and the window's foot, the status line hidden (user, 2026-11-11) */
   min-width: 96px;
   padding: 5px 14px;
   font: inherit;
@@ -289,6 +289,29 @@ kbd {
 }
 
 #start-btn:disabled { color: var(--w98-shadow); cursor: default; }
+#start-btn[hidden], .load-bar[hidden] { display: none; }
+
+/* loading: the green bar of blocks of the time (user, 2026-11-11), drawn here — whole blocks only, one more at a time
+   (util.js breathe sets the width, a block and its gap at a time); in its place, once loaded, the Start button */
+.load-bar {
+  box-sizing: border-box;
+  height: 16px;
+  margin: 21px auto 17px; /* (with the margins round it, as tall as the 30 px button that takes its place: the window doesn't jump) */
+  padding: 1px 2px;
+  background: #fff;
+  border: 1px solid #686868;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.load-fill {
+  width: 0;
+  height: 100%;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 8px, #fff 8px 10px),
+    linear-gradient(180deg, #def7da 0%, #93df86 14%, #45c834 38%, #2fb221 58%, #5ccf4e 82%, #b7ecae 100%);
+}
 
 .win-status {
   margin: 10px 0 0;

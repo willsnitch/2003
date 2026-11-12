@@ -29,6 +29,7 @@ for (const k of ['shadowmap_pars_vertex', 'shadowmap_pars_fragment']) THREE.Shad
 const params = new URLSearchParams(location.search);
 const SHOT = params.has('shot');
 const HEAVY = params.has('heavy'); // (the textures left as drawn, nothing let go of: for comparing against — lighten.js) // clean frame for comparing against the reference photo
+const REHEARSE = !params.has('norehearsal'); // (each thing drawn once before it is needed — `rehearse`, below; `?norehearsal`: as it was, readied at first sight: to measure against)
 
 // Where the reference photo was taken from: just inside the door, looking north-west.
 const START = { x: 3.3, z: 3.72, yaw: 33, pitch: -12 };
@@ -36,6 +37,57 @@ const START = { x: 3.3, z: 3.72, yaw: 33, pitch: -12 };
 const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 renderer.localClippingEnabled = true; // Luna in her boat (cat.clip)
+// The rehearsal's state (`rehearse`, far below), here because the game's first handlers read it.
+const rehearsed = {
+  ms: 0, shaders: 0, drawn: 0, rounds: 0, steps: [], line: null, // (`steps`: what each round drew and took, for measuring)
+  left: 0, // how many things are still to be drawn
+  playing: false, still: 0, hurry: false, // you are playing; for how long your eye has not moved; no waiting for that (finish)
+  first: null, whole: null, // promises: the water's mirror ready; all of it done
+  /** All that is left, now, whether you are playing or not (for measuring); resolves when it is done. */
+  finish() { rehearsed.hurry = true; return rehearsed.whole; },
+};
+/** For how long the eye has stood still (the rehearsal takes its turns then: a held frame shows in nothing that you see move by your own doing). */
+const eyeWas = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+function stillFor(dt) {
+  if (camera.position.distanceToSquared(eyeWas.p) < 1e-8 && Math.abs(camera.quaternion.dot(eyeWas.q)) > 1 - 1e-8) rehearsed.still += dt;
+  else {
+    rehearsed.still = 0;
+    eyeWas.p.copy(camera.position);
+    eyeWas.q.copy(camera.quaternion);
+  }
+}
+/**
+ * Leaves three's count of cutting planes at `n`, by drawing one small thing cut by that many into a pixel of its own:
+ * `compile` makes each shader for the count the last thing drawn left behind (0 for nearly everything).
+ */
+const primer = { scene: new THREE.Scene(), cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), mats: new Map(), mesh: null, target: null };
+function planesLeft(n, draw = true) {
+  let m = primer.mats.get(n);
+  if (!m) {
+    primer.mats.set(n, (m = new THREE.MeshBasicMaterial({ clippingPlanes: n ? Array.from({ length: n }, () => new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e4)) : null })));
+    m.customProgramCacheKey = () => 'planes-left'; // (its own shader: never one of the game's, which are made later, from the shader code as the house sets it)
+  }
+  if (!primer.mesh) {
+    primer.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+    primer.mesh.frustumCulled = false;
+    primer.scene.add(primer.mesh);
+    primer.target = new THREE.WebGLRenderTarget(1, 1);
+  }
+  primer.mesh.material = m;
+  if (!draw) return;
+  const was = renderer.getRenderTarget(), due = renderer.shadowMap.needsUpdate;
+  renderer.shadowMap.needsUpdate = false;
+  renderer.setRenderTarget(primer.target);
+  renderer.render(primer.scene, primer.cam);
+  renderer.setRenderTarget(was);
+  renderer.shadowMap.needsUpdate = due;
+}
+// (made now, with nothing else for the card to do: asked for in the middle of the loading, each waited its turn behind
+// every other shader — 7 s. The counts: none; Luna's suit, 16, its torso and paws, 17 — boat.js; her coat, 24 — cat.js CLIPS.
+// Another count is made when it is asked for. With `?norehearsal` they are made all the same and not drawn: three
+// takes from Math.random for every thing it makes, and two loads with the same dice — tools/measure-server.py `?seeded`,
+// tools/same-picture.js — must make the same things in the same order to build the same house.)
+for (const n of [16, 17, 24, 0]) planesLeft(n, REHEARSE);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); // (and less when the frames come slowly: sharpen())
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -143,6 +195,7 @@ player.onStep = (surface, speed, first) => sound.step(surface, speed, first);
 player.onLand = (speed, surface) => sound.land(speed, surface);
 const cat = new Cat(scene, ctx, player, camera);
 cat.swinging = house.swinging; // the fridge's doors, open, are in her way too
+cat.doors = [door.seg, ...house.doorSegs]; // (shut across her way after she set off: she finds another, or stops this side)
 // her boat, for when the bathroom has flooded (boat.js)
 house.bath.volume.patch(house.scene); // what is under the water seen through it, from above (bath.js)
 // in the bathroom's water you float (player.js), never up through the head of its doorway
@@ -153,6 +206,14 @@ player.headroomAt = (x, z) => {
   return x > B.door.x0 - 0.3 && x < B.door.x1 + 0.3 && Math.abs(z - B.z0) < 0.45 ? ROOM.door.h - 0.1 : Infinity;
 };
 const boat = lunaBoat(house.scene, cat, { bathroom: house.bathroom, water: house.bath, colliders: ctx.colliders, env: house.bathEnv, door: house.bathDoor, blocks: () => house.cabinetBlock() });
+// Luna, her boat, her hat and her diving suit take the bathroom's water (bath.js `volume`) here, with everything else:
+// they took it as they came (every 60th frame, in the loop), each one's shaders made over again there and then, the
+// game stopped while they were (user, 2026-11-11, playing on the web: "it freezes to load" as she takes to her boat)
+if (REHEARSE) {
+  house.bath.volume.patch(house.scene);
+  house.bath.volume.patch(cat.root);
+  house.bath.volume.patchThese(boat.gear.paws);
+}
 // she has the run of the house, and follows you from room to room
 cat.wholeHouse({ colliders: ctx.colliders, ...house.catFloor, stamp: () => `${Math.round(door.state.angle * 20)}|${house.doorStamp()}`, roomAt: house.roomAt, perches: house.catPerches });
 
@@ -455,6 +516,7 @@ desktop.onSound = (name) => sound.ui(name);
 
 function setPlaying(on) {
   player.enabled = on;
+  rehearsed.playing = on; // (the rehearsal: flat out behind the start window, only while you stand still once you play)
   player.edge.set(0, 0);
   startEl.hidden = on;
   crossEl.hidden = !on || !!player.seat;
@@ -584,6 +646,40 @@ function bathDoorBehind(dt) {
   D.onSlam = () => sound.sample('door-slam', bathShut.hinge.set(S.ax, 1, S.az)); // silent until there is a recording
   bathShut.armed = false;
 }
+// And going out (user, 2026-11-11: "when you leave the bathroom, Luna leaves with you and then the door closes"): the
+// moment you are through the doorway she comes straight out after you, to just outside it on your side; once you are
+// both clear of the doorway it shuts behind you the way it does going in — never on her, never with her still in there.
+const bathLeft = { armed: false, was: false, byHand: false, hinge: new THREE.Vector3() };
+// In there, or on her way in (user, 2026-11-12: "always make sure she's out before the door closes" — you had gone in
+// and straight out again while she was still coming from the living room; it shut behind you, she went on in, and
+// was shut in there): wherever she is walking, leaping or climbing to counts as where she is.
+const inBath = (x, z) => house.roomAt(x, z) === 'bath';
+const lunaHeadedIn = () => cat.queue.some((s) => (s.type === 'walk' && inBath(s.x, s.z)) || ((s.type === 'jump' || s.type === 'line') && s.to && inBath(s.to[0], s.to[2])));
+const lunaInBath = () => cat.place.name === 'room' && (inBath(cat.pos.x, cat.pos.z) || lunaHeadedIn());
+function bathDoorAfter() {
+  const D = house.bathDoor, S = D.seg, B = house.bathroom, room = house.roomAt(player.pos.x, player.pos.y);
+  if (room === 'bath') { bathLeft.was = true; bathLeft.armed = false; bathLeft.byHand = false; return; }
+  if (bathLeft.was) { bathLeft.was = false; bathLeft.armed = D.state.target > 0.01; } // (out into the doorway: on your way out)
+  if (!bathLeft.armed) return;
+  if (D.state.target <= 0.01) { bathLeft.armed = false; return; } // (shut some other way meanwhile)
+  const doorX = (B.door.x0 + B.door.x1) / 2, goingIn = lunaHeadedIn(), catIn = lunaInBath();
+  if (catIn && !cat.ride && !cat.dive && (!cat.hurrying || goingIn) && !cat.committed) {
+    // just outside, a little your way
+    const ox = doorX, oz = B.z0 - 0.55, vx = player.pos.x - ox, vz = player.pos.y - oz, v = Math.hypot(vx, vz), k = v > 0.9 ? Math.min(0.5, v - 0.8) / v : 0;
+    const x = ox + vx * k, z = Math.min(oz + vz * k, B.z0 - 0.4);
+    const [tx, tz] = cat.nav.free(x, z) ? [x, z] : cat.nav.centre(cat.nav.nearest(x, z));
+    cat.hurryTo(tx, tz, THREE.MathUtils.clamp(Math.hypot(cat.pos.x - tx, cat.pos.z - tz) / 2.2, 1.5, 4));
+  }
+  // both of you out, and clear of the doorway (its frame, and a stride past it)
+  const inWay = (x, z, m) => Math.abs(x - doorX) < (B.door.x1 - B.door.x0) / 2 + 0.25 && z > B.z0 - m;
+  if (catIn || cat.place.name !== 'room' || inWay(cat.pos.x, cat.pos.z, 0.5) || inWay(player.pos.x, player.pos.y, 0.35) || cat.air) return; // (her: tail and all)
+  bathLeft.armed = false;
+  if (bathLeft.byHand) { bathLeft.byHand = false; D.turn(false); return; } // (you went to shut it: shut as a hand shuts it)
+  D.state.open = false;
+  D.state.target = 0;
+  D.state.slam = true;
+  D.onSlam = () => sound.sample('door-slam', bathLeft.hinge.set(S.ax, 1, S.az)); // silent until there is a recording
+}
 // Nor can you shut it yourself, in there, till she is in too (user, 2026-11-02). And with water in the room (once it
 // is up to the ceiling), opening it first sends all the water back where it came from — off the floor into the bath
 // and down its plug hole, the plug in as it is — in 8 s (bath.js drain), and the taps go off; only then does it open.
@@ -593,9 +689,12 @@ house.bathDoor.before = (opening) => {
   const B = house.bath;
   if (B.draining) return true; // (it is going: wait)
   if (!opening) {
-    const here = house.roomAt(player.pos.x, player.pos.y) === 'bath';
-    const lunaIn = cat.place.name === 'room' && house.roomAt(cat.pos.x, cat.pos.z) === 'bath';
-    return here && bathShut.armed && !lunaIn ? "It won't budge." : null;
+    const here = house.roomAt(player.pos.x, player.pos.y) === 'bath', lunaIn = lunaInBath();
+    if (here) return bathShut.armed && !lunaIn ? "It won't budge." : null;
+    // shutting it from outside with her still in there (or on her way in): she comes out to you first, then it shuts
+    // (bathDoorAfter) — never on her
+    if (lunaIn) { bathLeft.armed = bathLeft.byHand = true; return true; }
+    return null;
   }
   // and once the taps are on, it won't open at all till the water is up to the ceiling (user, 2026-11-02)
   if ((B.state.hot || B.state.cold) && !B.atCeiling) return "It won't budge.";
@@ -971,7 +1070,7 @@ function wade(dt) {
 const SHARP = Math.min(devicePixelRatio, 1.5);
 const sharp = { scale: SHARP, low: Math.min(SHARP, 0.6), times: [], last: 0, tried: null, hold: 0, from: Infinity };
 function sharpen(now) {
-  if (SHOT || document.hidden) return void (sharp.last = 0);
+  if (SHOT || document.hidden || (rehearsed.left && !rehearsed.playing)) return void (sharp.last = 0); // (nor while the rehearsal runs flat out behind the start window: its frames are not the machine's)
   if (sharp.from === Infinity) sharp.from = now + 4000; // (not the first seconds: every shadow being drawn)
   if (sharp.last) sharp.times.push(now - sharp.last);
   sharp.last = now;
@@ -1002,6 +1101,7 @@ function tick() {
   frame++;
 
   player.update(dt);
+  if (rehearsed.left) stillFor(dt);
   swimFor = player.swimming ? swimFor + dt : 0; // (the swim keys: shown for its first seconds)
   if (!warp.to && !player.grounded && player.vy > 0.5 && atScreen()) startWarp(world === 'room' ? 'zelpa' : 'room');
   stepWarp(dt);
@@ -1069,6 +1169,7 @@ function tick() {
 
   lunaFollows(dt);
   bathDoorBehind(dt);
+  bathDoorAfter();
   breatheOut(dt);
   wade(dt);
   const catMoved = cat.update(dt, t);
@@ -1186,7 +1287,21 @@ function keepProgramArrays() {
 function beginShaders() {
   renderer.setRenderTarget(picture.rt);
   const jobs = [[scene], [house.scene], [house.cellar.scene], [zelpa.scene], [cat.root, house.scene], [cat.root, zelpa.scene]];
-  const ready = Promise.all(jobs.map(([what, lit]) => renderer.compileAsync(what, camera, lit ?? null)));
+  if (REHEARSE) {
+    planesLeft(0); // (`compile` makes a shader for as many cutting planes as the last thing drawn had: none)
+    jobs.splice(4, 1); // (Luna in the house: below, as she is really drawn there)
+  }
+  const begun = jobs.map(([what, lit]) => renderer.compileAsync(what, camera, lit ?? null));
+  if (REHEARSE) {
+    const sim = house.bath.look.sim; // the ripples' own shader (water.js RippleSim: on nothing in any world), made as the taps were opened
+    begun.push(renderer.compileAsync(sim.scene, sim.cam));
+    const L = lunaParts(), bare = L.paws.map((p) => p.material);
+    begun.push(...beginCut(L.plain, scene), ...beginCut(L.all, house.scene));
+    L.paws.forEach((p, i) => { p.material = boat.gear.paws[i]; }); // (her suit's paws: on her only while it is)
+    begun.push(...beginCut(L.paws, house.scene));
+    L.paws.forEach((p, i) => { p.material = bare[i]; });
+  }
+  const ready = Promise.all(begun);
   renderer.setRenderTarget(null);
   return ready;
 }
@@ -1199,9 +1314,201 @@ async function prepareShaders() {
   for (let i = 0; i < programs.length; i++) {
     programs[i].getUniforms();
     programs[i].getAttributes();
-    if (i % 40 === 39) await breathe(0.9 + (0.1 * i) / programs.length);
+    if (i % 40 === 39) await breathe(0.9 + (0.05 * i) / programs.length);
   }
   keepProgramArrays();
+}
+
+/**
+ * A dress rehearsal, while the loading line runs (user, 2026-11-11, playing on the web: "it freezes to load" when the
+ * taps are opened and when Luna takes to her boat and her diving suit). Two things were still left to the moment a
+ * thing is first drawn, and on a first visit the game stood still for each (2.9 s as the taps opened, 1.2 s as the
+ * water went over the side, ~1 s as it spread, 0.6 s as the boat came, 0.6 and 1.1 s as it came into view):
+ * - the graphics card readies a shader again for every kind of picture it is drawn into (its format, how many
+ *   samples), at the first draw there: ~0.15 s for each of the rooms' shaders on an M2 (the second draw, nothing).
+ *   The bathroom's water mirrors the room in a picture of another kind than the screen's; and what waits hidden — the
+ *   water, the drops, the boat, the suit — had never been drawn in any;
+ * - a shader is made for the number of planes its material is cut by (Luna's coat: 24; her suit: 16 or 17), which
+ *   `compile` takes from the last thing drawn, not from the material: the ones it made for her were never used, hers
+ *   were made at first sight, one at a time, ~0.4 s each. (And she, her boat and her suit took the bathroom's water
+ *   patch only as they came, every 60th frame: made over again there.)
+ * So her shaders are begun with the others, for the planes she has (`beginCut`), and each thing is drawn once as it
+ * will be, shown or hidden, in view or not, into a few pixels of each kind of picture: what the water can mirror
+ * (`hideForReflection`: the bathroom) and all that waits hidden in the house, in the mirror's kind; the hidden, in the
+ * screen's; Luna as the bedroom has her and as the house has her, with her suit and without, in both. It goes on beside
+ * the loading from the moment every lamp is in (the page is only waiting then, for Mum, the angel and the shaders),
+ * each thing as soon as its shaders are ready. Nothing is changed by it: what was hidden is hidden again, the lamps'
+ * shadows are not touched. See REHEARSE for the switch: without it none of this, all as it was (to measure against).
+ */
+const drawable = (o) => o.isMesh || o.isPoints || o.isLine || o.isSprite;
+/** Whether `o` is shown now: itself and all it hangs from. */
+const shownNow = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
+/** Begins the shaders of `things` as `world`'s lamps light them, each for the planes its material is cut by. Returns the promises. */
+function beginCut(things, world) {
+  const byPlanes = new Map();
+  for (const o of things) {
+    const n = [].concat(o.material)[0].clippingPlanes?.length ?? 0;
+    (byPlanes.get(n) ?? byPlanes.set(n, []).get(n)).push(o);
+  }
+  const begun = [];
+  for (const [n, list] of byPlanes) {
+    planesLeft(n);
+    begun.push(renderer.compileAsync({ traverse: (f) => list.forEach(f), traverseVisible() {} }, camera, world)); // (a stand-in for a scene: just these)
+  }
+  planesLeft(0);
+  return begun;
+}
+/** Luna's parts: `all`, `plain` (as she is without her hat and her suit) and her four `paws`. */
+function lunaParts() {
+  const all = [], plain = [];
+  cat.root.traverse((o) => {
+    if (!drawable(o)) return;
+    all.push(o);
+    for (let q = o; q && q !== cat.root; q = q.parent) if (!q.visible) return;
+    plain.push(o);
+  });
+  return { all, plain, paws: cat.rig.legs.map((L) => L.paw) };
+}
+/**
+ * Draws those of `world`'s things that are in `pick`, once, into `target` — whether shown now or not, in view or not —
+ * by the lamps as they are lit now (a shader is made for the lamps there are: one that is off stays off), and leaves
+ * everything as it was. The others are not drawn (by their layers: their lamps, if they carry any, still count).
+ */
+function drawOnce(world, target, pick) {
+  const undo = [], set = (o, key, v) => { const was = o[key]; if (was !== v) { o[key] = v; undo.push(() => { o[key] = was; }); } };
+  const lampsOff = [], chosen = [], rest = [];
+  world.updateMatrixWorld(true);
+  world.traverse((o) => {
+    if (o.isLight) { if (!shownNow(o)) lampsOff.push(o); return; }
+    if (drawable(o)) (pick.has(o) ? chosen : rest).push(o);
+  });
+  for (const o of rest) set(o.layers, 'mask', 0);
+  for (const o of chosen) {
+    for (let q = o; q; q = q.parent) set(q, 'visible', true);
+    set(o, 'frustumCulled', false);
+    if (o.isInstancedMesh && o.count === 0) set(o, 'count', 1);
+  }
+  for (const l of lampsOff) set(l, 'visible', false);
+  const was = renderer.getRenderTarget(), due = renderer.shadowMap.needsUpdate;
+  renderer.shadowMap.needsUpdate = false; // (the lamps' shadows are the game's to draw, with what is really there)
+  renderer.setRenderTarget(target);
+  renderer.render(world, camera);
+  renderer.setRenderTarget(was);
+  renderer.shadowMap.needsUpdate = due;
+  for (let i = undo.length - 1; i >= 0; i--) undo[i]();
+  planesLeft(0);
+  rehearsed.drawn += chosen.length;
+}
+/** Resolves when the graphics card has done all it has been sent (the page is free meanwhile, the loading line goes on). */
+async function cardDone(most = 30000) {
+  const gl = renderer.getContext(), mark = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0), t0 = performance.now();
+  gl.flush();
+  do await breathe(rehearsed.line); while (gl.getSyncParameter(mark, gl.SYNC_STATUS) !== gl.SIGNALED && !gl.isContextLost() && performance.now() - t0 < most);
+  gl.deleteSync(mark);
+}
+/** `shaders`: the promise of all the shaders begun (after it, everything is drawn whether its shaders say ready or not). */
+async function rehearse(shaders) {
+  shaders.catch(() => {});
+  if (!REHEARSE) return;
+  let firstDone = null;
+  rehearsed.first = new Promise((r) => { firstDone = r; });
+  await null; // (whoever called goes on first: the wait for Mum and the angel begins now, not after the first things are sent)
+  const t0 = performance.now(), made = renderer.info.programs.length;
+  const screens = sharedPicture(); // the screen's kind: half-float, multisampled, with its depth
+  screens.setSize(8, 8);
+  const mirrors = new THREE.WebGLRenderTarget(8, 8, { type: THREE.HalfFloatType }); // the water's (water.js PlanarReflection)
+  // what stands in the bathroom, which its water mirrors; and whatever in the house waits hidden
+  const bath = ROOMS[1].around, hidden = [], standing = [];
+  house.scene.updateMatrixWorld(true);
+  house.scene.traverse((o) => {
+    if (!drawable(o)) return;
+    if (!shownNow(o)) hidden.push(o);
+    else if (bath.intersectsSphere(boundsOf(o))) standing.push(o);
+  });
+  // Luna: where the bedroom has her; and in the house, with all she wears in the bathroom — her hat, her suit, its paws
+  const L = lunaParts(), suit = boat.gear.paws;
+  const inHouse = (draw) => {
+    const home = cat.root.parent, at = home.children.indexOf(cat.root);
+    house.scene.add(cat.root);
+    draw();
+    house.scene.remove(cat.root);
+    home.children.splice(at, 0, cat.root); // (back where she was, in the same place among the others)
+    cat.root.parent = home;
+  };
+  const suited = (draw) => inHouse(() => {
+    const bare = L.paws.map((p) => p.material);
+    L.paws.forEach((p, i) => { p.material = suit[i]; });
+    draw();
+    L.paws.forEach((p, i) => { p.material = bare[i]; });
+  });
+  const suitOf = (o) => [suit[L.paws.indexOf(o)]], own = (o) => [].concat(o.material);
+  // (what lets light through — the water falling over the bath's side — by itself in the mirror's kind: with it three
+  // draws all that is solid once more, into a picture of the screen's kind, which the room will have had by then)
+  const clear = (o) => own(o).some((m) => m.transmission > 0);
+  // (of what waits hidden, the water mirrors only what is in the bathroom, or put away where the bedroom is — the boat,
+  // the drops, the bubbles wait at the house's origin — not the hob's flames or the hose's water)
+  const byTheWater = (o) => bath.intersectsSphere(boundsOf(o)) || ROOMS[0].around.intersectsSphere(boundsOf(o));
+  const jobs = [
+    { world: house.scene, target: mirrors, kind: 'm', left: standing.filter((o) => !clear(o)) }, // (the room in its water: the 2.9 s as the taps opened — the loading waits for this one)
+    { world: house.scene, target: screens.rt, kind: 's', left: hidden },
+    { world: house.scene, target: mirrors, kind: 'm', left: hidden.filter((o) => !clear(o) && byTheWater(o)) },
+    { world: house.scene, target: mirrors, kind: 'm', left: [...standing, ...hidden].filter(clear) },
+    { world: house.scene, target: screens.rt, kind: 's', left: L.all, around: inHouse },
+    { world: house.scene, target: mirrors, kind: 'm', left: L.all, around: inHouse },
+    { world: house.scene, target: screens.rt, kind: 's', left: L.paws, around: suited, mats: suitOf },
+    { world: house.scene, target: mirrors, kind: 'm', left: L.paws, around: suited, mats: suitOf },
+  ];
+  // A thing is drawn once its shaders are ready (asked without waiting), a few shaders new to a kind of picture at a
+  // time (~0.15 s each on a first visit), and the card is let finish before the next few: sent all at once, the page
+  // stood still until the card had done them all (16 s). What three asks of a shader the first time it is used is
+  // asked here, before anything is sent: asked in the middle, each answer waits for the draws before it.
+  // The loading waits only for the first job, the water's mirror — done by then as it is, on a first visit, the page
+  // waiting for the shaders anyway (the card does one or the other: all of it under the loading line would be ~10 s
+  // more). The rest goes on behind the start window, three at a time; and once you play, one at a time and only while
+  // your eye has stood still for half a second, a second apart (0.08–0.45 s each on a first visit; none while you move).
+  const seen = new Set(), asked = new WeakSet();
+  let all = false, lastAt = 0;
+  shaders.then(() => { all = true; }, () => { all = true; });
+  const programsOf = (mats) => mats.flatMap((m) => [...(renderer.properties.get(m).programs?.values() ?? [])]);
+  const ready = (ps) => all || (ps.length > 0 && ps.every((p) => p.isReady()));
+  const paced = () => rehearsed.playing && !rehearsed.hurry;
+  const count = () => (rehearsed.left = jobs.reduce((n, j) => n + j.left.length, 0));
+  for (let idle = 0; count(); ) {
+    while (paced() && !(rehearsed.still >= 0.5 && !player.seat && performance.now() - lastAt > 1000)) await breathe(); // (not at the PC: its pointer would stop with each)
+    const at = performance.now(), most = paced() ? 1 : 3;
+    let fresh = 0, drew = 0;
+    for (const j of jobs) {
+      const now = new Set(), matsOf = j.mats ?? own;
+      for (const o of j.left) {
+        const ps = programsOf(matsOf(o));
+        if (!ready(ps)) continue;
+        const key = j.kind + ps.map((p) => p.id).join('.');
+        if (!seen.has(key)) {
+          if (fresh >= most) continue;
+          seen.add(key);
+          fresh++;
+        }
+        for (const p of ps) if (!asked.has(p) && p.isReady()) { asked.add(p); p.getUniforms(); p.getAttributes(); }
+        now.add(o);
+      }
+      if (!now.size) continue;
+      j.left = j.left.filter((o) => !now.has(o));
+      (j.around ?? ((draw) => draw()))(() => drawOnce(j.world, j.target, now));
+      drew += now.size;
+    }
+    const sent = performance.now() - at;
+    await cardDone();
+    lastAt = performance.now();
+    if (drew) rehearsed.steps.push([Math.round(at - t0), Math.round(sent), Math.round(lastAt - at), drew, fresh, most]); // (when, ms to send, ms in all, things, shaders new to a kind, at most)
+    else if (++idle > 3000) all = true; // (never: the shaders' promise comes first)
+    if (!jobs[0].left.length) firstDone();
+    rehearsed.rounds++;
+  }
+  firstDone();
+  mirrors.dispose();
+  keepProgramArrays();
+  rehearsed.ms = Math.round(performance.now() - t0);
+  rehearsed.shaders = renderer.info.programs.length - made;
 }
 
 built(); // (Mum and the angel, whenever they come)
@@ -1209,18 +1516,24 @@ built(); // (Mum and the angel, whenever they come)
 // their way over the network and the textures are lightened, where before it only began after both (on a first visit
 // the shaders take ~11 s of their own — players, 2026-11-09: "too long to load"; later visits find them kept by the
 // browser). Only once every lamp is in its scene: a shader is made for the lamps there are.
-beginShaders().catch(() => {});
+rehearsed.whole = rehearse(beginShaders()).catch((e) => console.error('rehearsal', e)); // (beside the rest of the loading, from here; and on after it)
 lampsAsSaid(scene, ROOM_LAMPS, 'the bedroom');
 lampsAsSaid(house.scene, HOUSE_LAMPS, 'the house');
 await Promise.race([Promise.all(arrivals), new Promise((r) => setTimeout(r, 8000))]); // (here in time: compiled with the rest)
 const WORLDS = [scene, house.scene, house.cellar.scene, zelpa.scene];
 const lightened = HEAVY ? null : await lighten(renderer, WORLDS, { progress: 0.88 }); // (the same pictures, lighter: lighten.js)
 await prepareShaders();
+rehearsed.line = 0.97;
+await Promise.race([rehearsed.first, rehearsed.whole]); // (the water's mirror; the rest goes on behind the start window)
+rehearsed.line = null;
 statusEl.textContent = '';
+statusEl.hidden = true; // (its empty line under the button set it off-centre: user, 2026-11-11)
+$('start-load').hidden = true; // loaded: the bar goes, the Start button comes up in its place
+startBtn.hidden = false;
 startBtn.disabled = false;
 if (SHOT) startEl.hidden = true; // camera stays parked on the reference pose
 requestAnimationFrame(tick);
 
 // handles for tuning from the console
 window.GAME = { THREE, scene, camera, renderer, composer, passes: { room: roomPass, house: housePass, cellar: cellarPass }, player, cat, boat, desktop, sound, inventory, sit: setSeated, stars: ctx.stars, lights, blind, door, bloom, grade, M, ROOM, START,
-  reshadow: () => { shadowsDirty = 3; }, sharp, unseen, lightened, lighten: (o) => lighten(renderer, WORLDS, o), zelpa, house, colliders: ctx.colliders, tv: ctx.tv, warpTo: startWarp, world: () => world };
+  reshadow: () => { shadowsDirty = 3; }, sharp, unseen, lightened, rehearsed, lighten: (o) => lighten(renderer, WORLDS, o), zelpa, house, colliders: ctx.colliders, tv: ctx.tv, warpTo: startWarp, world: () => world };

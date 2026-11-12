@@ -26,11 +26,63 @@ opening or a lamp.** The always-rules and the checklist stay in `CLAUDE.md`.
   the floor shows inside the basement (`cellar.passes`), so it keeps out of `UNDER`. basement.js burns 2711 draws of
   its shared RNG where the wooden doors were: anything new before the steps uses its own RNG, or the basement moves.
 - Random numbers in shaders: no `sin` of big numbers (the GPU's differs): `windDice`.
+- A sprite (or mesh) whose scale is set only in an `update` is drawn at scale 1 — a metre across — for the frame it
+  is made in if that comes after the update (a bubble let go from `boat.update`): set its size when it is made
+  (`bubbles.js` emit does now).
+- Luna in the water: the room's water is 0.76 m across and she keeps 0.55 m off you, so she can't swim round you —
+  you are a block in `dive.blocks` (boat.js `moving`), her ways go over your head or under your feet. A swim step's
+  "getting no nearer" must not count while she is still turning to it (1.65 rad/s: she gave up on you mid-turn,
+  over and over). Facing something right beside her (her boat) she turns only as far as her head needs, or her nose
+  goes into it and `keepClear` slides her off.
+- Indoors or out (build.js `outdoorsOnly`, 2026-11-11): a material is the rooms' if one of its meshes overlaps a room
+  by 2 cm, **or lies wholly on the room's side of its walls' faces** (tiles, a socket's plate, a wear layer on a wall:
+  under 2 cm proud of an outer wall they had counted as out of doors — no lamp lit them, and they shone once the
+  outdoor fill stopped being the house's own for an eye indoors). A thing lying in an outer wall that must be the
+  rooms': `userData.indoors = true`. **An empty box passes every "inside" test** (each side ±Infinity): a mesh with
+  nothing in it at the bake — the short grass, an `InstancedMesh` at count 0 — counted as wholly inside a room, and the
+  lawn's blades took the house's dim fill and all its lamps (black in the shade, the yard 2–4 ms slower). Test
+  `box.isEmpty()` first. A thing standing in a doorway with lamps on it (`outdoorSun(m)`): give it
+  `userData.indoorSide` (which way is in, how far shut) or its inner face takes the yard's fill. To find what
+  changes indoors after touching the yard's light: draw the same instant twice (hold `__now`), old values pinned on
+  the lights, and difference the pictures — only what shows through glass and doors may change. The hatch's lamp
+  flickers: frames apart, the corridor's end differs by itself.
+
+- **A shader is readied once more for every kind of picture it is drawn into** (format, how many samples), at its
+  first draw there: ~0.15 s for each of the rooms' shaders on an M2 on a first visit (0.3 s the see-through ones),
+  nothing on later visits — so it is never seen here, only by players (2026-11-11: 2.9 s as the taps opened, the
+  room's first time in the water's mirror: half-float ×1, the screen is ×4). The same for whatever waits hidden:
+  never drawn anywhere until its moment. A new picture of another kind (a mirror, a cube, a screen in the game), or
+  a new thing that waits hidden: into the rehearsal (main.js `rehearse`: its `jobs`), or it stops the game the
+  first time. The cost is per shader and kind, not per thing (54 things on one shader: one).
+- **`compile` makes a shader for as many clipping planes as the last thing drawn had**, not as the material has
+  (three keeps the count from the last draw): all of Luna's (24) and her suit's (16, 17) were made for none, never
+  used, and the right ones were made in play, one at a time (~0.4 s each on a first visit). `beginCut` (main.js)
+  begins them with the count left right (`planesLeft`: one small thing cut by that many drawn first); after any
+  draw of a clipped thing outside a frame, `planesLeft(0)` before the next `compile`. A material with another count
+  of planes: add the count to the list by `planesLeft`. And a material patched after its shader was begun
+  (`needsUpdate`) is made again where it is next drawn: Luna, her boat and her suit take the bathroom's water at
+  the start now (`volume.patch`, `patchThese`), not as they come.
+- The card does one thing at a time: readying shaders for a kind of picture does not go on beside the compiling
+  (three shaders took 5 s while it compiled), and draws sent all at once hold the page until the card is through
+  them (16 s) — send a few, wait for the card (`cardDone`: a fence, asked between frames). A question to the card
+  (a shader's uniforms, its link) waits for every draw sent before it: ask first, then send. A shader made in the
+  middle of the loading waits its turn behind all the others (7 s for a tiny one).
+- Two loads with the same dice (`?seeded`) build the same house only if they make the same three objects in the same
+  order: three takes Math.random for each one's id. One render target more in one load and Luna's tail lay elsewhere
+  in the other (it looked like a change to her). And once the taps run, two loads of the very same code part ways
+  (the boat ends 0.1–0.2 m apart): compare the water by the shaders' text, not by pictures.
 
 ## Hooks worth knowing
 
 - `hingedDoor` (house.js) takes `before(opening)` and `turn(open)`. Luna (cat.js): `ride` for her boat, `dive` /
-  `swimAlong` when the bathroom is full. The bath (bath.js): two planar reflections while the floor's water and the
+  `swimAlong` when the bathroom is full (`dive.greet`: to your face first), `heel` (at your heel: boat.js sets it while
+  the taps run and the boat isn't up), `watch(p)` (stop and watch a point; boat.js keeps `lookPoint` on the boat).
+  Her ways (`nav.path`) are worked out once, when she sets off: a door that shuts after that is caught by `wayOpen`
+  (cat.js; `cat.doors` = the bedroom door + `house.doorSegs`, every hinged door in the colliders) and she goes round or
+  stops this side — a new door her nav goes round is in it by itself. `keepClear` eases her out of things far slower than
+  she runs: never rely on it to stop her going through something. The bathroom door (main.js `bathDoorAfter`,
+  `lunaInBath`): "in" counts where she is walking or leaping to.
+  The bath: `splash(x, z, yaw)` for something diving in (splash.js), `disturb` for a ripple. The bath (bath.js): two planar reflections while the floor's water and the
   bath's are apart (`floorMirror`). The pool (pool.js): `poolBubbles` / `poolRipples`.
 
 ## Lines along edges that come and go
@@ -40,6 +92,15 @@ multisampled picture works a surface's point out past its edge (shadow lookups l
 position boxes like the bath's dim or `corridorFill` read "outside"). Shadow coords are `centroid` (main.js); any new
 varying position used for a box test or a lookup must be `centroid` too, and a box must reach into the walls as far
 as the ceilings do (13.5 cm). Reproduce at 760×450, not full size.
+
+`centroid` takes a point the triangle covers, not one that is seen: a face that runs on hidden inside another wall
+still shades the pixels at the corner from its hidden part. The corridor's south wall ran through the end wall to the
+house's corner, its inner face looking at the evening sun; that hidden 14 cm was sunlit and the far right corner
+flashed as you walked (2026-11-12). A corner belongs to the wall whose inner face looks away from the sun (or the face
+stops at the corner). Found at `renderer.setPixelRatio(0.6)` (what `sharpen` drops to on a slow machine), 2–5 m off,
+by scanning the corner's pixels along a walk and switching lights off one at a time; at full size it never showed.
+Same family: a face cut flush with a hole shows past a worn-round frame's edge — set its edge back under the frame
+(the hatch's ceiling, 3 cm).
 
 ## Drawing (2026-11-03 → 10, same picture, faster)
 
@@ -86,6 +147,17 @@ as the ceilings do (13.5 cm). Reproduce at 760×450, not full size.
   `THREE.ShaderChunk` must come before any shader is begun (same name, older code kept otherwise). The rooms' early
   shaders are only for materials nothing touches later (indoors, not along the corridor) and take bath.js's water
   patch then.
+- **The rehearsal** (main.js `rehearse`, 2026-11-12; `?norehearsal` = without, as before): from the moment every lamp
+  is in, beside the rest of the loading and on after it, each thing is drawn once into a few pixels of each kind of
+  picture it will be drawn into (see Traps) — `jobs`, in order: what stands in the bathroom, in the mirror's kind
+  (**the loading waits for this one**: ~3 s on a first visit); what waits hidden in the house, in the screen's; the
+  hidden by the water, in the mirror's; Luna as the house has her, with hat and suit, and her suit's paws, in both.
+  A thing goes when its shaders say ready, three new shader-kinds a round, the card let finish between rounds; once
+  you play (`rehearsed.playing`), one a round, only with the eye still for 0.5 s, a second apart, not at the PC.
+  Nothing is left changed (`drawOnce`: the rest hidden by their layers, so lamps on hidden things still count; a
+  lamp that is off stays off; shadows untouched). `GAME.rehearsed`: `left`, `steps` (when, ms to send, ms, things,
+  new shader-kinds, at most), `finish()` (all of it now: for measuring). Numbers (M2, cold): the whole of it ~13 s
+  of the card's time; loading 24.0 s against 21.7–22.6 s; later visits 14.3 s, the rehearsal 2.7 s beside it.
 
 ## Textures (lighten.js, 2026-11-05, pixel-identical)
 
@@ -143,3 +215,8 @@ up to the feet locked — unlocked, the plinth's texture warped: 660k → 198k t
   `__marks` (when the loading line changed) and a JS profile (`__prof.stop()`). GPU time of a frame:
   `EXT_disjoint_timer_query_webgl2` round one tick, the median of ten. Two loads compared pixel for pixel: `?seeded`,
   the clock frozen, the same walk, the hatch's lamp pinned dark (it has fits of its own), grain off.
+- A first visit's stops: `2003-measure` in `.claude/launch.json` (port 8151) with `?cold`, the loop handed over, each
+  frame ended with `gl.finish()` + one pixel read back, `gl.linkProgram` counted (2026-11-11: ended with `getError`
+  only, a frame's time is the backlog of the twenty before it). The same picture in two loads: `tools/same-picture.js`
+  (its routine at its top: the same 3808 frames, eight views, hashes kept between loads).
+

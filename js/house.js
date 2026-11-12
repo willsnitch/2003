@@ -15,7 +15,7 @@ import { ROOM } from './room.js';
 import { box, boxMM, cyl, cable, deg, mulberry32, canvasTex, HOUSE_SUN, breathe, arrive } from './util.js';
 import { curvedScreen, screenMat, takeable } from './props.js';
 import { glowMaterial, UV_TORCH } from './uvtorch.js';
-import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN, standIns, beginShaders } from './build.js';
+import { metric, faces, slab, flat, pierced, bakeStatic, shadowTwin, shadowOnly, layeredShadow, outdoorsOnly, outdoorSun, outdoorLit, splitOutdoor, twoFills, YARD_SUN, YARD_EYE, standIns, beginShaders } from './build.js';
 import { backYard } from './yard.js';
 import { WIND, dappleCuts } from './grove.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -253,7 +253,10 @@ export async function buildHouse(renderer, bedroomM, ctx) {
     marks: [{ type: 'ghost', x: 2.3, z: mid, amount: 0.6 }, { type: 'ghost', x: 5.6, z: mid, amount: 0.8 }, { type: 'ghost', x: lampX, z: mid }, { type: 'water', x: C.x1 - 0.3, z: C.z0 + 0.13, rx: 0.26, rz: 0.12 }, { type: 'smudge', x: HATCH.x1 + 0.13, z: mid + 0.04, n: 7 }],
     light: (x, z) => Math.exp(-(((x - lampX) / 1.8) ** 2) - ((z - mid) / 2.4) ** 2),
   }, 0, 0.07);
-  for (const [x0, x1, z0, z1] of [[C.x0, HATCH.x0, C.z0 - IN, C.z1 + IN], [HATCH.x1, C.x1 + IN, C.z0 - IN, C.z1 + IN], [HATCH.x0, HATCH.x1, C.z0 - IN, HATCH.z0], [HATCH.x0, HATCH.x1, HATCH.z1, C.z1 + IN]]) {
+  // (its cut edge 3 cm back from the hole, over the frame's boards: flush with the hole, it showed white past the frame's
+  // worn-round inner edge, a bright line round the hatch even with the lamp dark — user, 2026-11-12)
+  const CUT = 0.03;
+  for (const [x0, x1, z0, z1] of [[C.x0, HATCH.x0 - CUT, C.z0 - IN, C.z1 + IN], [HATCH.x1 + CUT, C.x1 + IN, C.z0 - IN, C.z1 + IN], [HATCH.x0 - CUT, HATCH.x1 + CUT, C.z0 - IN, HATCH.z0 - CUT], [HATCH.x0 - CUT, HATCH.x1 + CUT, HATCH.z1 + CUT, C.z1 + IN]]) {
     g.add(Object.assign(flat(x0, x1, z0, z1, H, hallCeiling, false), { castShadow: true }));
   }
   // north wall, on past the bedroom (its other face out of doors, past it: the house's old siding)
@@ -261,7 +264,11 @@ export async function buildHouse(renderer, bedroomM, ctx) {
   wallCollider(W + t, C.x1 + t, D, D + t);
   // south wall: Mum's door and the bathroom's. Its south face is tiled where the bathroom is.
   const south = C.z1;
-  pierced([C.x0, C.x1 + t], [[DOORS.mum.x0, DOORS.mum.x1, 0, DOOR_H], [DOORS.bath.x0, DOORS.bath.x1, 0, DOOR_H]], (a0, a1, y0, y1) => {
+  // (it stops at the dead end's face, which takes the corner: run on through the end wall to the house's corner, its
+  // inner face went on 14 cm inside the end wall, facing the evening sun, and the corner lit up by flashes as you walked
+  // down the corridor — the picture drawn small shades a pixel at the edge from any point of the face's own, hidden ones
+  // too — user, 2026-11-12. The north wall can keep its corner: its inner face looks away from the sun)
+  pierced([C.x0, C.x1], [[DOORS.mum.x0, DOORS.mum.x1, 0, DOOR_H], [DOORS.bath.x0, DOORS.bath.x1, 0, DOOR_H]], (a0, a1, y0, y1) => {
     // split where the rooms behind it change, so each piece can wear the right face on that side
     for (const [p0, p1] of [[a0, Math.min(a1, B.x0)], [Math.max(a0, B.x0), Math.min(a1, B.x1)], [Math.max(a0, B.x1), a1]]) {
       if (p1 - p0 < 1e-3) continue;
@@ -275,7 +282,7 @@ export async function buildHouse(renderer, bedroomM, ctx) {
   // the dead end, between the two walls' ends (where two walls overlapped, their faces lay in one plane and
   // flickered between each other as you moved — user, 2026-10-20: "parts of the walls glitch": no wall here
   // overlaps another any more, each corner belongs to one of them)
-  solid(slab(C.x1, C.x1 + t, 0, TOP, D + t, south, faces(M.wall, { px: mat.siding, nx: mat.wallpaper })));
+  solid(slab(C.x1, C.x1 + t, 0, TOP, D + t, south + t, faces(M.wall, { px: mat.siding, nx: mat.wallpaper, pz: mat.siding }))); // (the south-east corner its own: see the south wall)
   wallCollider(C.x1, C.x1 + t, D, south + t);
   // skirting
   for (const [x0, x1] of [[C.x0, ROOM.door.x0 - 0.075], [ROOM.door.x1 + 0.075, C.x1]]) g.add(boxMM(x0, x1, 0, 0.09, D + t, D + t + 0.014, M.trim));
@@ -500,11 +507,10 @@ export async function buildHouse(renderer, bedroomM, ctx) {
   const hemi = new THREE.HemisphereLight(DAY.hemi.sky, DAY.hemi.ground, DAY.hemi.house);
   scene.add(hemi);
   // and out of doors its own (build.js twoFills: what is indoors keeps the first, whatever your eye)
-  const hemiOut = new THREE.HemisphereLight(DAY.hemi.sky, DAY.hemi.ground, DAY.hemi.house);
+  // — the whole sky lighting the shade, blue from above and green off the lawn, wherever your eye is: only how
+  // strong it looks changes with the eye, with the sun and everything else out there (see update)
+  const hemiOut = new THREE.HemisphereLight(DAY.hemi.yard.sky, DAY.hemi.yard.ground, DAY.hemi.yard.intensity * 1.8);
   scene.add(hemiOut);
-  // out in the yard the whole sky lights the shade, blue from above and green off the lawn: indoors
-  // it is the house's own dim fill. The eye is where it decides which (see update).
-  const fill = { inSky: new THREE.Color(DAY.hemi.sky), inGround: new THREE.Color(DAY.hemi.ground), outSky: new THREE.Color(DAY.hemi.yard.sky), outGround: new THREE.Color(DAY.hemi.yard.ground) };
   // the sun, from the same quarter as the one through the bedroom blind, and the sky high over it (daytime.js)
   const middle = new THREE.Vector3(0.6, 0, 1);
   const sun = outdoorLight(scene, DAY.sun.color, new THREE.Vector3(...DAY.sun.dir).normalize(), middle, 4096); // (its sharp shadows want the finer map: at 2048 a texel is 2 cm)
@@ -588,6 +594,7 @@ export async function buildHouse(renderer, bedroomM, ctx) {
   const shadowed = [sun, sky, spill, ...indoorLamps];
   for (const l of shadowed) l.shadow.autoUpdate = false;
   let gain = 1.8, bedroomDoor = -1, doorTick = 0;
+  const used = { pupil: 0, retina: 0 }; // how used to the daylight your eye is, 0 indoors … 1 out in it: quickly, then slowly (see update)
   const due = new Map(); // light → how many more frames its shadow wants drawing
   const mark = (lights, n = 2) => {
     for (const l of lights) {
@@ -694,6 +701,8 @@ export async function buildHouse(renderer, bedroomM, ctx) {
     bathEnv: cool,
     /** Things that move that you can't walk through, and that aren't in the colliders (Luna's paths would go round them): the open cabinet door. */
     extraColliders: [cabSeg, ...kit.fridge.segs],
+    /** The house's doors her ways go round, as segment colliders (Luna: a door shut across her way since she set off). */
+    doorSegs: doors.filter((d) => d.seg && ctx.colliders.includes(d.seg)).map((d) => d.seg),
     /** Doors that swing out into the room, as segment colliders, for Luna to keep out of (the fridge's). */
     swinging: kit.fridge.segs,
     /** The wall cabinet's door while it stands open, as a box {x0, x1, z0, z1, base, top}, or null. */
@@ -793,20 +802,31 @@ export async function buildHouse(renderer, bedroomM, ctx) {
         d.moving = true;
         if (doorTick % 4 === 0) mark(d.lights ?? shadowed, 1); // while it swings, now and then is enough
       }
-      // the eye opens up indoors, so the yard through a window is far brighter than the room; out in it, it
-      // isn't — and out there it is dimmer than it was (YARD_LIGHT: user, 2026-10-17, "lower the brightness in the yard")
-      gain += ((api.outdoors(eye) > 0.5 ? YARD_LIGHT : 1.8) - gain) * (1 - Math.exp(-dt * 1.6));
+      // the eye opens up indoors (and down in the cellar), so the yard through a window is far brighter than the room;
+      // out in it, it isn't — and out there it is as bright as YARD_LIGHT says (user, 2026-10-17, "lower the brightness
+      // in the yard"; back to 1 on 2026-10-28). `gain` is that and nothing else: one exposure for all that is out of
+      // doors — the sun and the sky on it, the open air's fill in its shade, what it reflects and what glows in it, the
+      // sky itself — so the yard seen from indoors is the yard you stand in, 1.8 times as bright, and stepping out it
+      // is all too bright at first and settles (user, 2026-11-11: "a strange play of light as I go out — I want the
+      // passage realistic". The shade's fill had been the house's own dim brown one for an eye indoors and the open
+      // sky's out there, changing in a quarter of a second at the door: as you stepped out the shade lifted up to seven
+      // times over and turned blue while the sun and the sky dimmed, each at its own pace; reflections and the
+      // neighbours' lit windows did not change at all).
+      // The eye gets used to the light in two paces — the pupil shuts in well under a second, the retina follows over
+      // a few — and to the dark more slowly: back indoors, the yard through the door grows bright again over 6–8 s.
+      const outThere = api.outdoors(eye) > 0.5 && !cellarWay.below(eye) ? 1 : 0, pace = outThere ? 1 : 0.4;
+      used.pupil += (outThere - used.pupil) * (1 - Math.exp(-dt * 3.2 * pace));
+      used.retina += (outThere - used.retina) * (1 - Math.exp(-dt * 0.7 * pace));
+      const k = 0.6 * used.pupil + 0.4 * used.retina;
+      gain = 1.8 * Math.pow(YARD_LIGHT / 1.8, k); // (in stops, as an exposure goes)
       // (the rooms keep the sun they have from inside wherever your eye is — seen from the yard they had been lit
-      // by the open sky's fill and far brighter: user, 2026-10-20; what is out of doors takes `gain` as before)
+      // by the open sky's fill and far brighter: user, 2026-10-20; what is out of doors takes `gain`)
       sun.intensity = SUN * 1.8;
       sky.intensity = SKY * 1.8;
       YARD_SUN.value = gain / 1.8;
-      const out = api.outdoors(eye);
-      fill.k = (fill.k ?? out) + (out - (fill.k ?? out)) * (1 - Math.exp(-dt * 4));
-      hemiOut.color.lerpColors(fill.inSky, fill.outSky, fill.k);
-      hemiOut.groundColor.lerpColors(fill.inGround, fill.outGround, fill.k);
-      hemiOut.intensity = THREE.MathUtils.lerp(DAY.hemi.house, DAY.hemi.yard.intensity * YARD_LIGHT, fill.k);
-      yard.brighten(gain + (1 - YARD_LIGHT) * 0.6 * fill.k); // (the sky itself dimmed less)
+      YARD_EYE.value = gain;
+      hemiOut.intensity = DAY.hemi.yard.intensity * gain;
+      yard.brighten(gain + (1 - YARD_LIGHT) * 0.6 * k); // (the sky itself dimmed less)
       spill.intensity = DAY.spillPower * bedroomDoorOpen * bedroomLit; // (as much light as the bedroom has: less with its blind shut)
       bathSpill.intensity = bathLit ? BATH_SPILL * THREE.MathUtils.clamp(doors[1].state.angle / deg(70), 0, 1) : 0;
       if (Math.abs(bedroomDoorOpen - bedroomDoor) > 1e-3) {
@@ -984,6 +1004,7 @@ function fanJamSpeed(parts, s) {
 function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, label = 'door', glass = false, front = false, inner = null, innerTrim = null, sill = null, threshold = null, worn = null }) {
   const f = onWall(parent, a, b, swing);
   const dw = f.userData.width;
+  let indoorSide = null; // (an outside door's: which way is in, and how far shut it is — for its fill, below)
   // in the frame: x along the opening from the hinge jamb, the wall across z −t/2…t/2, opening towards −z
   if (worn) {
     // `worn`: the casing on the side it opens to, outdoors — wide flat boards, a drip cap over the head, white
@@ -1003,11 +1024,19 @@ function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, labe
   if (sill && !threshold) f.add(slab(-0.005, dw + 0.005, -0.01, 0.001, -t / 2 - 0.006, t / 2 + 0.006, sill));
   if (threshold) { // an outside door's: an aluminium saddle across the whole depth of the wall, bevelled down to the floor each side
     const e = t / 2 + 0.01, flatTo = t / 2 - 0.018, hgt = 0.013;
-    const shape = new THREE.Shape([[-e, 0], [-flatTo, hgt], [flatTo, hgt], [e, 0]].map(([u, v]) => new THREE.Vector2(u, v)));
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: dw + 0.01, bevelEnabled: false }).rotateY(Math.PI / 2).translate(-0.005, 0, 0);
-    const saddle = new THREE.Mesh(geo, threshold);
-    saddle.receiveShadow = true;
-    f.add(saddle);
+    // in two pieces, parted under the leaf's inner face (u runs from the room, −, out to the yard, +): what is in
+    // the room is lit as the room is, by its lamps and its own fill, what is out past the shut door as the yard is.
+    // In one piece it was all out of doors — which showed once the open air's fill was no longer the house's own
+    // for an eye indoors (2026-11-11): a bright strip at the foot of the shut door, seen from the kitchen.
+    const part = t / 2 - (front ? 0.05 : 0.04) - 0.004;
+    const indoors = threshold.clone();
+    indoors.userData.indoors = true; // (build.js outdoorsOnly leaves it the rooms', though it lies in the wall)
+    for (const [mat, pts] of [[indoors, [[-e, 0], [-flatTo, hgt], [part, hgt], [part, 0]]], [threshold, [[part, 0], [part, hgt], [flatTo, hgt], [e, 0]]]]) {
+      const shape = new THREE.Shape(pts.map(([u, v]) => new THREE.Vector2(u, v)));
+      const saddle = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: dw + 0.01, bevelEnabled: false }).rotateY(Math.PI / 2).translate(-0.005, 0, 0), mat);
+      saddle.receiveShadow = true;
+      f.add(saddle);
+    }
   }
   const lw = dw - 0.045, lh = DOOR_H - 0.025 - (threshold ? 0.014 : 0), lt = front ? 0.05 : 0.04; // (over a threshold: shorter, standing on it)
   const pivot = new THREE.Group();
@@ -1110,8 +1139,10 @@ function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, labe
     dust.renderOrder = 1;
     pivot.add(dust);
     // lit by the kitchen's lamp as well as the sky: it stands in the doorway, half in, and its inside face
-    // went black (outdoorsOnly passes over a material already marked)
-    pivot.traverse((o) => { if (o.isMesh && o.material.isMeshStandardMaterial && o.material !== M.knob) outdoorSun(o.material); }); // (its lamps kept: build.js)
+    // went black (outdoorsOnly passes over a material already marked). Its fill too: shut, the face turned into
+    // the kitchen takes the house's own, like the wall beside it; swung out over the porch, all of it the open air's
+    indoorSide = { value: new THREE.Vector4(-swing[0], 0, -swing[1], 1) };
+    pivot.traverse((o) => { if (o.isMesh && o.material.isMeshStandardMaterial && o.material !== M.knob) { o.material.userData.indoorSide = indoorSide; outdoorSun(o.material); } }); // (its lamps kept: build.js)
   }
   for (const side of [1, -1]) {
     const rose = cyl(0.03, 0.03, 0.008, M.knob, lw - 0.07, 0.96, side * (lt / 2 + 0.004));
@@ -1145,6 +1176,7 @@ function hingedDoor(ctx, M, parent, { a, b, swing, open = 0, locked = null, labe
   const hinge = new THREE.Vector3(), tip = new THREE.Vector3();
   const apply = () => {
     pivot.rotation.y = state.angle;
+    if (indoorSide) indoorSide.value.w = 1 - THREE.MathUtils.smoothstep(Math.abs(state.angle), deg(10), deg(60));
     f.updateMatrixWorld(true);
     pivot.localToWorld(hinge.set(0, 0, 0));
     pivot.localToWorld(tip.set(lw, 0, 0));
@@ -1233,6 +1265,7 @@ function glassPane(w, h, env, seed, inside = false, lay = undefined, shape = nul
     : new THREE.MeshBasicMaterial({ map: dust, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
   const sheen = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.04, metalness: 0, envMap: env, envMapIntensity: 4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
   sheen.position.z = 0.0008;
+  sheen.material.userData.sameToEveryEye = true; // (build.js outdoorSun: the glass is the house's, and seen from both sides)
   for (const m of [dirt, sheen]) {
     m.castShadow = false;
     m.receiveShadow = inside; // (glass indoors, lit by the room: without, the sun lit its dust through the walls — the photograph's, glowing in the dark corridor; user, 2026-10-28)
@@ -1656,8 +1689,10 @@ function atticHatch(g, M, ctx, A, ceiling) {
     shade.material.emissiveIntensity = 1.2 * lit + 0.03 * Math.min(1, level * 8); // (the filament's last red as it dies)
     ceiling.emissiveIntensity = HALL_GLOW * lit; // (its light thrown back up at the ceiling: it comes and goes with it)
   });
-  // what is above: dark (just under the roof's own boards)
-  g.add(Object.assign(flat(A.x0, A.x1, A.z0, A.z1, H + 0.0195, new THREE.MeshBasicMaterial({ color: 0x050403, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), false), { castShadow: false })); // (half a millimetre under the roof's underside: drawn in front of it, or the two flickered)
+  // what is above: dark (just under the roof's own boards); out past the hole to the walls, where a look up through the
+  // slit goes on over the frame into the gap under the roof (it met the roof's underside there, lit as out of doors: a
+  // bright line along the slit, the lamp dark or not — user, 2026-11-12)
+  g.add(Object.assign(flat(A.x0 - 0.07, C.x1 + 0.01, C.z0 - 0.01, C.z1 + 0.01, H + 0.0195, new THREE.MeshBasicMaterial({ color: 0x050403, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), false), { castShadow: false })); // (half a millimetre under the roof's underside: drawn in front of it, or the two flickered)
   // the frame round the hole, a little below the ceiling
   const F2 = 0.07;
   g.add(oldBoard(A.x0 - F2, A.x1 + F2, H - 0.018, H, A.z0 - F2, A.z0, old, seed++));

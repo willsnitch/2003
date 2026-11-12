@@ -169,6 +169,7 @@ export function buildWindow(scene, M) {
   // wrong — user, 2026-10-18: "put it back as it was")
   const dirt = new THREE.Mesh(pane, new THREE.MeshBasicMaterial({ map: T.windowDirtTex(ww, win.y1 - win.y0), transparent: true, depthWrite: false }));
   const sheen = new THREE.Mesh(pane, new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.04, metalness: 0, envMap: scene.environment, envMapIntensity: 4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  sheen.material.userData.sameToEveryEye = true; // (build.js outdoorSun, should it ever be lit as out of doors: the glass is the house's)
   for (const [m, z] of [[dirt, -0.088], [sheen, -0.0878]]) {
     m.position.set(cx, midY, z);
     m.receiveShadow = false;
@@ -320,7 +321,7 @@ export function buildDoor(scene, M, colliders) {
     seg.bz = pivot.position.z - Math.sin(state.angle) * lw;
   };
   apply();
-  return { group: pivot, state, apply };
+  return { group: pivot, state, apply, seg };
 }
 
 /**

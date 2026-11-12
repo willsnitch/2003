@@ -10,7 +10,9 @@
 // 4. grid('name.jpg', [[x, z, lookX, lookY, lookZ, fov], …]) puts you at each x, z looking at the point
 //    and saves the pictures side by side (2 a row, 1100 px wide) as one JPEG: Read it from there. One grid
 //    of 2–4 views per check — cheap. grab('name.jpg', x, z, …) is the single-view version.
-//    It runs 30 frames per view, a pause every 5, so the eye's adaptation out in the yard (house.js gain) has settled.
+//    It runs 30 frames per view, a pause every 5: about a second, in which the eye going out into the yard has done
+//    most of its settling (house.js gain: ~3 s for all of it, 6–8 s coming back in). For a settled picture step
+//    more frames first, or pin it: GAME.house.outdoors = () => 0 or 1.
 // 5. Numbers beat pictures: read GAME.* in JS (GAME.house.scene.traverse, GAME.player.colliders…). A
 //    raycast from the camera hits invisible helper planes 0.3–0.5 m in front of it: filter distance > 0.8.
 // 6. Afterwards: pkill -f snap-receiver.py; resize_window preset 'desktop'; navigate to http://localhost:8141/.

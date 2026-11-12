@@ -51,6 +51,7 @@ export function bubbles(parent, count, level, bend = null) {
       b.ph = Math.random() * 6.28;
       b.v.copy(push);
       b.s.position.copy(p);
+      b.s.scale.setScalar(size); // (its size now: one let go after this frame's update was drawn a metre across — splash.js)
       b.ox = p.x;
       b.oz = p.z;
       b.s.visible = true;
